@@ -75,8 +75,10 @@ class TestNomosHarborHooks(unittest.TestCase):
     def test_build_install_command_and_version_parser(self) -> None:
         """Verify version-pinned install shell command and combined semver formatting."""
         cmd = build_nomos_install_command(nomos_version="v4.5.1")
-        self.assertIn("VERSION=v4.5.1", cmd)
-        self.assertIn("BIN_DIR=/usr/local/bin", cmd)
+        self.assertIn("NOMOS_VERSION=v4.5.1", cmd)
+        self.assertIn("NOMOS_INSTALL_DIR=/usr/local/bin", cmd)
+        self.assertTrue(cmd.startswith("set -eu;"))
+        self.assertIn("bash /tmp/nomos-install.sh", cmd)
         self.assertEqual(
             parse_combined_version(
                 "2.1.318 (Claude Code)\n"

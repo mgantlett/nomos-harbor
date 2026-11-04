@@ -194,17 +194,21 @@ def build_nomos_install_command(
     install_url: str = DEFAULT_INSTALL_URL,
     target_bin_dir: str = "/usr/local/bin",
 ) -> str:
-    """Build the container shell command that installs the static `nomos` binary."""
-    env_parts = [f"BIN_DIR={shlex.quote(target_bin_dir)}"]
+    """Build a POSIX `/bin/sh`-compatible command that installs the static `nomos` binary."""
+    env_parts = [f"NOMOS_INSTALL_DIR={shlex.quote(target_bin_dir)}"]
     if nomos_version and nomos_version.strip():
         clean_ver = nomos_version.strip()
-        env_parts.append(f"VERSION={shlex.quote(clean_ver)}")
+        env_parts.append(f"NOMOS_VERSION={shlex.quote(clean_ver)}")
     env_prefix = " ".join(env_parts)
     bin_path = shlex.quote(f"{target_bin_dir.rstrip('/')}/nomos")
+    tmp_installer = "/tmp/nomos-install.sh"
     return (
-        "set -euo pipefail; "
+        "set -eu; "
         f"mkdir -p {shlex.quote(target_bin_dir)}; "
-        f"curl -fsSL {shlex.quote(install_url)} | {env_prefix} sh; "
+        f"curl -fsSL {shlex.quote(install_url)} -o {tmp_installer}; "
+        f"if command -v bash >/dev/null 2>&1; then {env_prefix} bash {tmp_installer}; "
+        f"else sed 's/-euo pipefail/-eu/' {tmp_installer} | {env_prefix} sh; fi; "
+        f"rm -f {tmp_installer}; "
         f"chmod 755 {bin_path}; "
         f"{bin_path} --version"
     )
