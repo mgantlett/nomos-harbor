@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nomos-harbor"
+version = "0.1.0"
+description = "Nomos deterministic governance harness adapter for Harbor and Harbor Index benchmarks"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [
+  { name = "Mark Gantlett", email = "mark@sophialabs.ca" },
+]
+dependencies = [
+  "harbor>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://sophialabs.ca"
+Repository = "https://github.com/mgantlett/nomos-harbor"
+
+[tool.setuptools.packages.find]
+where = ["src"]
