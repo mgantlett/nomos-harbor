@@ -1,8 +1,8 @@
 """Pure-Python hook manifest synthesis and container bootstrap helpers for Harbor trials.
 
-Provides additive Claude Code settings.json merging and container shell commands
-that wire compiled Go `nomos hook` interceptors around stock Tier 1 coding agents
-without polluting the `/app` benchmark workspace.
+Provides additive Claude Code and Gemini CLI settings.json merging and container shell
+commands that wire compiled Go `nomos hook` interceptors around stock Tier 1 coding
+agents without polluting the `/app` benchmark workspace.
 """
 
 from __future__ import annotations
@@ -19,6 +19,11 @@ PRE_TOOL_MATCHER = (
     "Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Glob|Grep|WebFetch|WebSearch|Task.*|mcp__.*"
 )
 POST_TOOL_MATCHER = "Write|Edit|MultiEdit|NotebookEdit"
+GEMINI_PRE_TOOL_MATCHER = (
+    "run_shell_command|read_file|write_file|replace|list_directory|glob|"
+    "search_file_content|web_fetch|google_web_search|mcp_.*"
+)
+GEMINI_POST_TOOL_MATCHER = "write_file|replace"
 SEMVER_RE = re.compile(r"(\d+\.\d+\.\d+)")
 
 
@@ -82,6 +87,58 @@ def build_nomos_hook_manifest(
     }
 
 
+def build_nomos_gemini_hook_manifest(
+    nomos_bin: str = DEFAULT_REMOTE_NOMOS_BIN,
+    hermetic_dir: str | None = None,
+    container_sandbox: bool = True,
+) -> dict[str, Any]:
+    """Construct the canonical Gemini CLI `~/.gemini/settings.json` hook dictionary.
+
+    Enables `hooksConfig.enabled = True` and registers `BeforeTool` (10000ms) and
+    `AfterTool` (5000ms) command interceptors backed by `nomos hook`.
+    """
+    quoted_bin = shlex.quote(nomos_bin)
+    suffix = _build_hook_flag_suffix(
+        hermetic_dir=hermetic_dir,
+        container_sandbox=container_sandbox,
+    )
+    pre_cmd = f"{quoted_bin} hook pre-tool{suffix}"
+    post_cmd = f"{quoted_bin} hook post-tool{suffix}"
+    return {
+        "hooksConfig": {
+            "enabled": True,
+        },
+        "hooks": {
+            "BeforeTool": [
+                {
+                    "matcher": GEMINI_PRE_TOOL_MATCHER,
+                    "hooks": [
+                        {
+                            "name": "nomos-pre-tool",
+                            "type": "command",
+                            "command": pre_cmd,
+                            "timeout": 10000,
+                        }
+                    ],
+                }
+            ],
+            "AfterTool": [
+                {
+                    "matcher": GEMINI_POST_TOOL_MATCHER,
+                    "hooks": [
+                        {
+                            "name": "nomos-post-tool",
+                            "type": "command",
+                            "command": post_cmd,
+                            "timeout": 5000,
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+
 def _canonical_signature(item: Any) -> str:
     """Serialize a JSON hook entry canonically for idempotent deduplication."""
     return json.dumps(item, sort_keys=True, separators=(",", ":"))
@@ -107,7 +164,7 @@ def merge_hook_manifests(
     existing: dict[str, Any] | None,
     incoming: dict[str, Any],
 ) -> dict[str, Any]:
-    """Additively merge `incoming` Nomos hooks into an existing Claude settings map.
+    """Additively merge `incoming` Nomos hooks into an existing agent settings map.
 
     Preserves unrelated top-level settings and deduplicates repeated hook entries
     so workspace or user hooks are chained rather than overwritten.
@@ -154,18 +211,18 @@ def build_nomos_install_command(
 
 
 def parse_combined_version(stdout: str) -> str:
-    """Parse combined `claude --version` and `nomos --version` output into `<claude>+nomos-<ver>`."""
+    """Parse combined agent `--version` and `nomos --version` output into `<agent>+nomos-<ver>`."""
     lines = [ln.strip() for ln in stdout.splitlines() if ln.strip()]
     if not lines:
         return "unknown"
-    claude_match = SEMVER_RE.search(lines[0])
-    claude_ver = claude_match.group(1) if claude_match else lines[0]
+    agent_match = SEMVER_RE.search(lines[0])
+    agent_ver = agent_match.group(1) if agent_match else lines[0]
     if len(lines) < 2:
-        return claude_ver
+        return agent_ver
     nomos_line = next(
         (ln for ln in lines[1:] if "nomos version" in ln.lower()),
         lines[1],
     )
     nomos_match = SEMVER_RE.search(nomos_line)
     nomos_ver = nomos_match.group(1) if nomos_match else nomos_line
-    return f"{claude_ver}+nomos-{nomos_ver}"
+    return f"{agent_ver}+nomos-{nomos_ver}"

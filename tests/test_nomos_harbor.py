@@ -17,6 +17,7 @@ if str(PACKAGE_SRC) not in sys.path:
 
 from nomos_harbor.hooks import (  # noqa: E402
     DEFAULT_REMOTE_NOMOS_BIN,
+    build_nomos_gemini_hook_manifest,
     build_nomos_hook_manifest,
     build_nomos_install_command,
     merge_hook_manifests,
@@ -38,6 +39,17 @@ class TestNomosHarborHooks(unittest.TestCase):
         scoped_manifest = build_nomos_hook_manifest("/usr/local/bin/nomos", hermetic_dir="/app")
         scoped_pre = scoped_manifest["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         self.assertEqual(scoped_pre, "/usr/local/bin/nomos hook pre-tool --hermetic-dir /app")
+
+    def test_build_gemini_manifest_uses_before_and_after_tool(self) -> None:
+        """Ensure Gemini CLI manifest enables `hooksConfig` and millisecond timeouts."""
+        gemini_manifest = build_nomos_gemini_hook_manifest("/usr/local/bin/nomos")
+        self.assertTrue(gemini_manifest["hooksConfig"]["enabled"])
+        before = gemini_manifest["hooks"]["BeforeTool"][0]["hooks"][0]
+        after = gemini_manifest["hooks"]["AfterTool"][0]["hooks"][0]
+        self.assertEqual(before["command"], "/usr/local/bin/nomos hook pre-tool --container-sandbox")
+        self.assertEqual(before["timeout"], 10000)
+        self.assertEqual(after["command"], "/usr/local/bin/nomos hook post-tool --container-sandbox")
+        self.assertEqual(after["timeout"], 5000)
 
     def test_merge_hook_manifests_is_additive_and_idempotent(self) -> None:
         """Ensure existing Claude settings and custom hooks survive repeated merges."""
@@ -62,16 +74,24 @@ class TestNomosHarborHooks(unittest.TestCase):
 
     def test_build_install_command_and_version_parser(self) -> None:
         """Verify version-pinned install shell command and combined semver formatting."""
-        cmd = build_nomos_install_command(nomos_version="v4.4.1")
-        self.assertIn("VERSION=v4.4.1", cmd)
+        cmd = build_nomos_install_command(nomos_version="v4.5.1")
+        self.assertIn("VERSION=v4.5.1", cmd)
         self.assertIn("BIN_DIR=/usr/local/bin", cmd)
         self.assertEqual(
             parse_combined_version(
                 "2.1.318 (Claude Code)\n"
-                "nomos version 4.4.1 (linux/amd64)\n"
+                "nomos version 4.5.1 (linux/amd64)\n"
                 "compiler: go1.26.5 · open-core substrate\n"
             ),
-            "2.1.318+nomos-4.4.1",
+            "2.1.318+nomos-4.5.1",
+        )
+        self.assertEqual(
+            parse_combined_version(
+                "0.36.0\n"
+                "nomos version 4.5.1 (linux/amd64)\n"
+                "compiler: go1.26.5 · open-core substrate\n"
+            ),
+            "0.36.0+nomos-4.5.1",
         )
         self.assertEqual(parse_combined_version("2.1.220 (Claude Code)"), "2.1.220")
 
@@ -85,6 +105,7 @@ class _FakeEnvironment:
         """Initialize empty upload and exec logs."""
         self.uploads: list[tuple[Path, str]] = []
         self.commands: list[str] = []
+        self.last_settings: dict[str, object] = {}
 
     async def upload_file(self, source_path: Path | str, target_path: str) -> None:
         """Record uploaded file content before temporary directory cleanup."""
@@ -96,14 +117,14 @@ class _FakeEnvironment:
     async def exec(self, command: str, **_kwargs: object) -> SimpleNamespace:
         """Record executed container shell commands and return exit code 0."""
         self.commands.append(command)
-        return SimpleNamespace(return_code=0, stdout="2.1.220\n", stderr="")
+        return SimpleNamespace(return_code=0, stdout="0.36.0\n", stderr="")
 
 
 class TestNomosHarborAgentIntegration(unittest.TestCase):
-    """Verify `NomosClaudeCode` subclasses Harbor's `ClaudeCode` when `harbor` is present."""
+    """Verify `NomosClaudeCode` and `NomosGeminiCli` subclass Harbor agents cleanly."""
 
-    def test_agent_subclass_preflight_and_session_settings_upload(self) -> None:
-        """Validate factory preflight, binary upload, and `$CLAUDE_CONFIG_DIR/settings.json`."""
+    def test_claude_agent_subclass_preflight_and_session_settings_upload(self) -> None:
+        """Validate Claude factory preflight, binary upload, and `$CLAUDE_CONFIG_DIR/settings.json`."""
         if importlib.util.find_spec("harbor") is None:
             self.assertEqual(DEFAULT_REMOTE_NOMOS_BIN, "/usr/local/bin/nomos")
             return
@@ -124,7 +145,7 @@ class TestNomosHarborAgentIntegration(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             fake_bin = tmp_path / "nomos-static"
-            fake_bin.write_bytes(b"#!/bin/sh\necho 'nomos 4.4.1'\n")
+            fake_bin.write_bytes(b"#!/bin/sh\necho 'nomos version 4.5.1'\n")
             logs_dir = tmp_path / "logs"
             logs_dir.mkdir()
 
@@ -142,8 +163,76 @@ class TestNomosHarborAgentIntegration(unittest.TestCase):
             upload_targets = [target for _, target in env.uploads]
             self.assertIn("/usr/local/bin/nomos", upload_targets)
             self.assertIn("/logs/agent/sessions/settings.json", upload_targets)
-            pre_cmd = env.last_settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            pre_cmd = env.last_settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]  # type: ignore[index]
             self.assertIn("--container-sandbox", pre_cmd)
+
+    def test_gemini_agent_vertex_adc_staging_and_settings_hooks(self) -> None:
+        """Validate `NomosGeminiCli` Vertex ADC resolution, `settings.json` hooks, and ATIF tag."""
+        if importlib.util.find_spec("harbor") is None:
+            return
+
+        from harbor.agents.factory import AgentFactory
+        from harbor.models.trial.config import AgentConfig
+        from nomos_harbor import NomosGeminiCli, VertexGeminiCli
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_bin = tmp_path / "nomos-static"
+            fake_bin.write_bytes(b"#!/bin/sh\necho 'nomos version 4.5.1'\n")
+            fake_adc = tmp_path / "adc.json"
+            fake_adc.write_text(
+                json.dumps({"type": "authorized_user", "quota_project_id": "test-gcp-proj"}),
+                encoding="utf-8",
+            )
+            logs_dir = tmp_path / "logs"
+            logs_dir.mkdir()
+
+            valid_cfg = AgentConfig(
+                import_path="nomos_harbor:NomosGeminiCli",
+                model_name="vertex_ai/gemini-3.5-flash",
+                kwargs={
+                    "nomos_binary_path": str(fake_bin),
+                    "gcp_adc_path": str(fake_adc),
+                },
+            )
+            AgentFactory.run_preflight(valid_cfg)
+
+            control = VertexGeminiCli(
+                logs_dir=logs_dir,
+                model_name="vertex_ai/gemini-3.5-flash",
+                gcp_adc_path=str(fake_adc),
+            )
+            self.assertEqual(control.name(), "gemini-cli")
+            control_cfg, _ = control._build_settings_config("gemini-3.5-flash", "vertex-ai")
+            self.assertIsNotNone(control_cfg)
+            self.assertNotIn("hooks", control_cfg or {})
+
+            agent = NomosGeminiCli(
+                logs_dir=logs_dir,
+                model_name="vertex_ai/gemini-3.5-flash",
+                nomos_binary_path=str(fake_bin),
+                gcp_adc_path=str(fake_adc),
+            )
+            self.assertEqual(agent.name(), "nomos-gemini-cli")
+            auth_env = agent._resolve_auth_env()
+            self.assertEqual(auth_env["GOOGLE_GENAI_USE_VERTEXAI"], "true")
+            self.assertEqual(auth_env["GOOGLE_APPLICATION_CREDENTIALS"], "/tmp/gemini-secrets/adc.json")
+            self.assertEqual(auth_env["GOOGLE_CLOUD_PROJECT"], "test-gcp-proj")
+            self.assertEqual(auth_env["GOOGLE_CLOUD_LOCATION"], "global")
+
+            settings, _ = agent._build_settings_config("gemini-3.5-flash", "vertex-ai")
+            assert settings is not None
+            self.assertEqual(settings["security"]["auth"]["selectedType"], "vertex-ai")
+            self.assertTrue(settings["hooksConfig"]["enabled"])
+            before_cmd = settings["hooks"]["BeforeTool"][0]["hooks"][0]["command"]
+            self.assertIn("--container-sandbox", before_cmd)
+
+            env = _FakeEnvironment()
+            asyncio.run(agent.install(env))
+            asyncio.run(agent._inject_vertex_adc(env))
+            upload_targets = [target for _, target in env.uploads]
+            self.assertIn("/usr/local/bin/nomos", upload_targets)
+            self.assertIn("/tmp/gemini-secrets/adc.json", upload_targets)
 
 
 if __name__ == "__main__":
