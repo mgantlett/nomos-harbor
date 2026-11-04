@@ -38,7 +38,7 @@ harbor run --dataset terminal-bench@2.0 \
 
 ### Optional Agent Kwargs (`--ak`)
 
-- `--ak nomos_version=v4.4.1`: Pin a specific Nomos GitHub release version during container setup.
+- `--ak nomos_version=v4.5.0`: Pin a specific Nomos GitHub release version during container setup.
 - `--ak nomos_binary_path=/abs/path/to/linux-nomos`: Upload a prebuilt static Linux `nomos` binary directly from the host instead of fetching over HTTPS (validated fail-closed during Harbor preflight).
 - `--ak hermetic_dir=/workspace`: Optionally enforce strict single-directory path confinement (`--hermetic-dir`) instead of full-container `--container-sandbox` mode.
 

@@ -34,7 +34,7 @@ class NomosClaudeCodeOptions(ClaudeCodeOptions):
 
     nomos_version: str | None = Field(
         default=None,
-        description="Optional Nomos release tag (e.g. v4.4.1) when downloading via HTTPS.",
+        description="Optional Nomos release tag (e.g. v4.5.0) when downloading via HTTPS.",
     )
     nomos_binary_path: str | None = Field(
         default=None,
