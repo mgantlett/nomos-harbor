@@ -159,6 +159,12 @@ class VertexGeminiCli(GeminiCli):
 
         adc_path = self._resolve_vertex_adc_path()
         if adc_path is not None:
+            for key_var in (
+                "GEMINI_API_KEY",
+                "GOOGLE_API_KEY",
+                "GOOGLE_GENERATIVE_AI_API_KEY",
+            ):
+                env.pop(key_var, None)
             env["GOOGLE_APPLICATION_CREDENTIALS"] = self._remote_adc_path()
 
         project = (
