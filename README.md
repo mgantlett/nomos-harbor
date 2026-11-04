@@ -31,7 +31,7 @@ harbor run --dataset terminal-bench@2.0 \
 
 # Treatment Arm (Claude Code + Nomos)
 harbor run --dataset terminal-bench@2.0 \
-  --agent-import-path nomos_harbor:NomosClaudeCode \
+  --agent nomos_harbor:NomosClaudeCode \
   --model anthropic/claude-sonnet-4-5 \
   --n-concurrent 4
 ```
@@ -49,7 +49,7 @@ From a clone of [`harbor-framework/harbor-index`](https://github.com/harbor-fram
 ```sh
 uv run --with "git+https://github.com/mgantlett/nomos-harbor.git" \
   harbor run -c job-config.yaml \
-  --agent-import-path nomos_harbor:NomosClaudeCode \
+  --agent nomos_harbor:NomosClaudeCode \
   -m anthropic/claude-sonnet-5 \
   --ak reasoning_effort=high \
   -e docker \

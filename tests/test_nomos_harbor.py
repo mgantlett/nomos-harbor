@@ -66,8 +66,12 @@ class TestNomosHarborHooks(unittest.TestCase):
         self.assertIn("VERSION=v4.4.1", cmd)
         self.assertIn("BIN_DIR=/usr/local/bin", cmd)
         self.assertEqual(
-            parse_combined_version("2.1.220 (Claude Code)\nnomos version 4.4.1\n"),
-            "2.1.220+nomos-4.4.1",
+            parse_combined_version(
+                "2.1.318 (Claude Code)\n"
+                "nomos version 4.4.1 (linux/amd64)\n"
+                "compiler: go1.26.5 · open-core substrate\n"
+            ),
+            "2.1.318+nomos-4.4.1",
         )
         self.assertEqual(parse_combined_version("2.1.220 (Claude Code)"), "2.1.220")
 

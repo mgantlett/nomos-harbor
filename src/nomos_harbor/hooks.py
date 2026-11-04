@@ -162,6 +162,10 @@ def parse_combined_version(stdout: str) -> str:
     claude_ver = claude_match.group(1) if claude_match else lines[0]
     if len(lines) < 2:
         return claude_ver
-    nomos_match = SEMVER_RE.search(lines[-1])
-    nomos_ver = nomos_match.group(1) if nomos_match else lines[-1]
+    nomos_line = next(
+        (ln for ln in lines[1:] if "nomos version" in ln.lower()),
+        lines[1],
+    )
+    nomos_match = SEMVER_RE.search(nomos_line)
+    nomos_ver = nomos_match.group(1) if nomos_match else nomos_line
     return f"{claude_ver}+nomos-{nomos_ver}"
