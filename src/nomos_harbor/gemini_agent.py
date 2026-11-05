@@ -26,8 +26,10 @@ from pydantic import Field, field_validator
 from nomos_harbor.hooks import (
     DEFAULT_INSTALL_URL,
     DEFAULT_REMOTE_NOMOS_BIN,
+    EOL_DEBIAN_APT_REPAIR_COMMAND,
     build_nomos_gemini_hook_manifest,
     build_nomos_install_command,
+    build_vertex_media_guard_hook_manifest,
     merge_hook_manifests,
     parse_combined_version,
 )
@@ -47,6 +49,10 @@ class VertexGeminiCliOptions(GeminiCliOptions):
     gcp_adc_path: str | None = Field(
         default=None,
         description="Optional host path to Google Application Default Credentials JSON.",
+    )
+    vertex_media_guard: bool = Field(
+        default=False,
+        description="Opt-in BeforeTool guard preventing Gemini CLI Vertex HTTP 400 crashes on binary read_file.",
     )
 
     @field_validator("gcp_adc_path")
@@ -83,6 +89,14 @@ class NomosGeminiCliOptions(VertexGeminiCliOptions):
     container_sandbox: bool = Field(
         default=True,
         description="Enable `--container-sandbox` anti-reward-hacking mode when `hermetic_dir` is unset.",
+    )
+    vertex_media_guard: bool = Field(
+        default=True,
+        description="Enable BeforeTool guard preventing Gemini CLI Vertex HTTP 400 crashes on binary read_file.",
+    )
+    budget_sec: int | None = Field(
+        default=None,
+        description="Optional session wall-clock budget in seconds for 75%/90% Nomos AfterTool advisories.",
     )
 
     @field_validator("nomos_binary_path")
@@ -186,6 +200,11 @@ class VertexGeminiCli(GeminiCli):
             or "global"
         )
         env["GOOGLE_CLOUD_LOCATION"] = location
+        existing_node_opts = env.get("NODE_OPTIONS", "").strip()
+        if "--dns-result-order=" not in existing_node_opts:
+            env["NODE_OPTIONS"] = (
+                f"{existing_node_opts} --dns-result-order=ipv4first".strip()
+            )
         return env
 
     async def _inject_vertex_adc(self, environment: BaseEnvironment) -> None:
@@ -209,6 +228,45 @@ class VertexGeminiCli(GeminiCli):
             environment,
             command=f"chmod 600 {shlex.quote(remote_adc)}",
         )
+
+    @override
+    async def ensure_system_dependencies(
+        self,
+        environment: BaseEnvironment,
+        dependencies: tuple[str, ...],
+    ) -> None:
+        """Install system dependencies with automatic fallback to `archive.debian.org` on EOL Debian."""
+        try:
+            await super().ensure_system_dependencies(environment, dependencies)
+        except Exception as first_err:
+            repair = await environment.exec(
+                command=EOL_DEBIAN_APT_REPAIR_COMMAND,
+                user="root",
+            )
+            if repair.return_code != 0:
+                raise first_err
+            await super().ensure_system_dependencies(environment, dependencies)
+
+    @override
+    def _build_settings_config(
+        self,
+        model: str | None = None,
+        auth_type: str | None = None,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """Optionally attach the Vertex inline-media HTTP 400 guard when `vertex_media_guard=True`."""
+        base_config, model_alias = super()._build_settings_config(model, auth_type)
+        if self.options.vertex_media_guard and (
+            auth_type == "vertex-ai" or self._is_vertex_mode()
+        ):
+            seed = (
+                base_config
+                if base_config is not None
+                else {"experimental": {"skills": True}}
+            )
+            return merge_hook_manifests(
+                seed, build_vertex_media_guard_hook_manifest()
+            ), model_alias
+        return base_config, model_alias
 
     @override
     async def acp_install(self, environment: BaseEnvironment) -> None:
@@ -257,6 +315,7 @@ class NomosGeminiCli(VertexGeminiCli):
             nomos_bin=DEFAULT_REMOTE_NOMOS_BIN,
             hermetic_dir=self.options.hermetic_dir,
             container_sandbox=self.options.container_sandbox,
+            budget_sec=self.options.budget_sec,
         )
 
     def _resolve_local_nomos_binary(self) -> Path | None:
@@ -279,14 +338,22 @@ class NomosGeminiCli(VertexGeminiCli):
         model: str | None = None,
         auth_type: str | None = None,
     ) -> tuple[dict[str, Any] | None, str | None]:
-        """Merge Nomos `BeforeTool`/`AfterTool` hooks into `~/.gemini/settings.json`."""
-        base_config, model_alias = super()._build_settings_config(model, auth_type)
+        """Merge Nomos `BeforeTool`/`AfterTool` hooks first, followed by optional Vertex guards."""
+        base_config, model_alias = GeminiCli._build_settings_config(
+            self, model, auth_type
+        )
         seed = (
             base_config
             if base_config is not None
             else {"experimental": {"skills": True}}
         )
         merged = merge_hook_manifests(seed, self._nomos_manifest)
+        if self.options.vertex_media_guard and (
+            auth_type == "vertex-ai" or self._is_vertex_mode()
+        ):
+            merged = merge_hook_manifests(
+                merged, build_vertex_media_guard_hook_manifest()
+            )
         return merged, model_alias
 
     @override

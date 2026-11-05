@@ -36,19 +36,36 @@ class TestNomosHarborHooks(unittest.TestCase):
         self.assertEqual(pre, "/usr/local/bin/nomos hook pre-tool --container-sandbox")
         self.assertEqual(post, "/usr/local/bin/nomos hook post-tool --container-sandbox")
 
-        scoped_manifest = build_nomos_hook_manifest("/usr/local/bin/nomos", hermetic_dir="/app")
+        scoped_manifest = build_nomos_hook_manifest(
+            "/usr/local/bin/nomos", hermetic_dir="/app", budget_sec=900
+        )
         scoped_pre = scoped_manifest["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        self.assertEqual(scoped_pre, "/usr/local/bin/nomos hook pre-tool --hermetic-dir /app")
+        scoped_post_entry = scoped_manifest["hooks"]["PostToolUse"][0]
+        self.assertEqual(
+            scoped_pre,
+            "/usr/local/bin/nomos hook pre-tool --hermetic-dir /app --budget-sec 900",
+        )
+        self.assertIn("Bash|", scoped_post_entry["matcher"])
 
     def test_build_gemini_manifest_uses_before_and_after_tool(self) -> None:
         """Ensure Gemini CLI manifest enables `hooksConfig` and millisecond timeouts."""
-        gemini_manifest = build_nomos_gemini_hook_manifest("/usr/local/bin/nomos")
+        gemini_manifest = build_nomos_gemini_hook_manifest(
+            "/usr/local/bin/nomos", budget_sec=1200
+        )
         self.assertTrue(gemini_manifest["hooksConfig"]["enabled"])
         before = gemini_manifest["hooks"]["BeforeTool"][0]["hooks"][0]
-        after = gemini_manifest["hooks"]["AfterTool"][0]["hooks"][0]
-        self.assertEqual(before["command"], "/usr/local/bin/nomos hook pre-tool --container-sandbox")
+        after_group = gemini_manifest["hooks"]["AfterTool"][0]
+        after = after_group["hooks"][0]
+        self.assertEqual(
+            before["command"],
+            "/usr/local/bin/nomos hook pre-tool --container-sandbox --budget-sec 1200",
+        )
         self.assertEqual(before["timeout"], 10000)
-        self.assertEqual(after["command"], "/usr/local/bin/nomos hook post-tool --container-sandbox")
+        self.assertIn("run_shell_command|", after_group["matcher"])
+        self.assertEqual(
+            after["command"],
+            "/usr/local/bin/nomos hook post-tool --container-sandbox --budget-sec 1200",
+        )
         self.assertEqual(after["timeout"], 5000)
 
     def test_merge_hook_manifests_is_additive_and_idempotent(self) -> None:
@@ -221,6 +238,7 @@ class TestNomosHarborAgentIntegration(unittest.TestCase):
             self.assertEqual(auth_env["GOOGLE_APPLICATION_CREDENTIALS"], "/tmp/gemini-secrets/adc.json")
             self.assertEqual(auth_env["GOOGLE_CLOUD_PROJECT"], "test-gcp-proj")
             self.assertEqual(auth_env["GOOGLE_CLOUD_LOCATION"], "global")
+            self.assertIn("--dns-result-order=ipv4first", auth_env["NODE_OPTIONS"])
 
             settings, _ = agent._build_settings_config("gemini-3.5-flash", "vertex-ai")
             assert settings is not None
@@ -228,6 +246,10 @@ class TestNomosHarborAgentIntegration(unittest.TestCase):
             self.assertTrue(settings["hooksConfig"]["enabled"])
             before_cmd = settings["hooks"]["BeforeTool"][0]["hooks"][0]["command"]
             self.assertIn("--container-sandbox", before_cmd)
+            self.assertEqual(
+                settings["hooks"]["BeforeTool"][1]["hooks"][0]["name"],
+                "vertex-inline-media-guard",
+            )
 
             env = _FakeEnvironment()
             asyncio.run(agent.install(env))
@@ -235,6 +257,45 @@ class TestNomosHarborAgentIntegration(unittest.TestCase):
             upload_targets = [target for _, target in env.uploads]
             self.assertIn("/usr/local/bin/nomos", upload_targets)
             self.assertIn("/tmp/gemini-secrets/adc.json", upload_targets)
+
+    def test_eol_debian_apt_fallback_retries_after_archive_rewrite(self) -> None:
+        """Verify `VertexGeminiCli.ensure_system_dependencies` recovers from EOL Debian 404s."""
+        if importlib.util.find_spec("harbor") is None:
+            return
+
+        from nomos_harbor import VertexGeminiCli
+
+        class _BullseyeEnv(_FakeEnvironment):
+            def __init__(self) -> None:
+                super().__init__()
+                self.apt_attempts = 0
+
+            async def exec(self, command: str, **_kwargs: object) -> SimpleNamespace:
+                self.commands.append(command)
+                if command.startswith("command -v curl"):
+                    return SimpleNamespace(return_code=1, stdout="", stderr="")
+                if command.startswith("for manager in apt-get"):
+                    return SimpleNamespace(return_code=0, stdout="apt-get", stderr="")
+                if "apt-get update && apt-get install" in command:
+                    self.apt_attempts += 1
+                    if self.apt_attempts == 1:
+                        return SimpleNamespace(
+                            return_code=100,
+                            stdout="E: Failed to fetch http://deb.debian.org/debian-security/... 404 Not Found",
+                            stderr="",
+                        )
+                    return SimpleNamespace(return_code=0, stdout="installed", stderr="")
+                return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = VertexGeminiCli(
+                logs_dir=Path(tmp),
+                model_name="vertex_ai/gemini-3.5-flash",
+            )
+            env = _BullseyeEnv()
+            asyncio.run(agent.ensure_system_dependencies(env, ("curl",)))
+            self.assertEqual(env.apt_attempts, 2)
+            self.assertTrue(any("archive.debian.org" in cmd for cmd in env.commands))
 
 
 if __name__ == "__main__":

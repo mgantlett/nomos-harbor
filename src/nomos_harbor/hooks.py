@@ -19,30 +19,72 @@ PRE_TOOL_MATCHER = (
     "Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Glob|Grep|WebFetch|WebSearch|Task.*|mcp__.*"
 )
 POST_TOOL_MATCHER = "Write|Edit|MultiEdit|NotebookEdit"
+BUDGET_POST_TOOL_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit"
 GEMINI_PRE_TOOL_MATCHER = (
     "run_shell_command|read_file|write_file|replace|list_directory|glob|"
     "search_file_content|web_fetch|google_web_search|mcp_.*"
 )
 GEMINI_POST_TOOL_MATCHER = "write_file|replace"
+GEMINI_BUDGET_POST_TOOL_MATCHER = "run_shell_command|write_file|replace"
+VERTEX_INLINE_MEDIA_GUARD_SCRIPT = (
+    "if ! command -v node >/dev/null 2>&1 && [ -s ~/.nvm/nvm.sh ]; then "
+    ". ~/.nvm/nvm.sh >/dev/null 2>&1; fi; "
+    "node -e '"
+    'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{'
+    'try{const j=JSON.parse(d||"{}"),i=j.tool_input||{},p=String(i.file_path||i.path||"");'
+    "if(/\\.(png|jpe?g|gif|webp|bmp|tiff?|ico|pdf|mp4|mkv|avi|mov|webm|mp3|wav)$/i.test(p)){"
+    "process.stdout.write(JSON.stringify({decision:\"deny\",reason:"
+    "\"Vertex AI Gemini CLI rejects inline binary/image/PDF read_file turns with HTTP 400 INVALID_ARGUMENT. "
+    "Inspect or process this file via run_shell_command using python3 (PIL, cv2, numpy, pypdf) or CLI utilities instead.\"}));"
+    'return}}catch(e){}process.stdout.write("{}")})'
+    "'"
+)
+EOL_DEBIAN_APT_REPAIR_COMMAND = (
+    "set -eu; "
+    "repaired=0; "
+    "for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do "
+    '[ -f "$f" ] || continue; '
+    'if grep -Eq "bullseye|buster|stretch" "$f"; then '
+    "sed -i "
+    "-e '/-updates/d' "
+    "-e '/-backports/d' "
+    r"-e 's|https\?://deb\.debian\.org/debian-security|http://archive.debian.org/debian-security|g' "
+    r"-e 's|https\?://security\.debian\.org/debian-security|http://archive.debian.org/debian-security|g' "
+    r"-e 's|https\?://security\.debian\.org|http://archive.debian.org/debian-security|g' "
+    r"-e 's|https\?://deb\.debian\.org/debian|http://archive.debian.org/debian|g' "
+    '"$f"; '
+    "repaired=1; "
+    "fi; "
+    "done; "
+    '[ "$repaired" -eq 1 ]; '
+    "mkdir -p /etc/apt/apt.conf.d; "
+    'printf \'Acquire::Check-Valid-Until "false";\\n\' > /etc/apt/apt.conf.d/99archive-valid-until; '
+    "rm -rf /var/lib/apt/lists/*"
+)
 SEMVER_RE = re.compile(r"(\d+\.\d+\.\d+)")
 
 
 def _build_hook_flag_suffix(
     hermetic_dir: str | None = None,
     container_sandbox: bool = True,
+    budget_sec: int | None = None,
 ) -> str:
     """Format CLI flags for `nomos hook` inside disposable or repo-scoped containers."""
+    parts: list[str] = []
     if hermetic_dir and hermetic_dir.strip():
-        return f" --hermetic-dir {shlex.quote(hermetic_dir.strip())}"
-    if container_sandbox:
-        return " --container-sandbox"
-    return ""
+        parts.append(f" --hermetic-dir {shlex.quote(hermetic_dir.strip())}")
+    elif container_sandbox:
+        parts.append(" --container-sandbox")
+    if budget_sec is not None and budget_sec > 0:
+        parts.append(f" --budget-sec {int(budget_sec)}")
+    return "".join(parts)
 
 
 def build_nomos_hook_manifest(
     nomos_bin: str = DEFAULT_REMOTE_NOMOS_BIN,
     hermetic_dir: str | None = None,
     container_sandbox: bool = True,
+    budget_sec: int | None = None,
 ) -> dict[str, Any]:
     """Construct the canonical Claude Code settings.json hook dictionary for Nomos.
 
@@ -54,9 +96,15 @@ def build_nomos_hook_manifest(
     suffix = _build_hook_flag_suffix(
         hermetic_dir=hermetic_dir,
         container_sandbox=container_sandbox,
+        budget_sec=budget_sec,
     )
     pre_cmd = f"{quoted_bin} hook pre-tool{suffix}"
     post_cmd = f"{quoted_bin} hook post-tool{suffix}"
+    post_matcher = (
+        BUDGET_POST_TOOL_MATCHER
+        if (budget_sec is not None and budget_sec > 0)
+        else POST_TOOL_MATCHER
+    )
     return {
         "hooks": {
             "PreToolUse": [
@@ -73,7 +121,7 @@ def build_nomos_hook_manifest(
             ],
             "PostToolUse": [
                 {
-                    "matcher": POST_TOOL_MATCHER,
+                    "matcher": post_matcher,
                     "hooks": [
                         {
                             "type": "command",
@@ -91,6 +139,7 @@ def build_nomos_gemini_hook_manifest(
     nomos_bin: str = DEFAULT_REMOTE_NOMOS_BIN,
     hermetic_dir: str | None = None,
     container_sandbox: bool = True,
+    budget_sec: int | None = None,
 ) -> dict[str, Any]:
     """Construct the canonical Gemini CLI `~/.gemini/settings.json` hook dictionary.
 
@@ -101,9 +150,15 @@ def build_nomos_gemini_hook_manifest(
     suffix = _build_hook_flag_suffix(
         hermetic_dir=hermetic_dir,
         container_sandbox=container_sandbox,
+        budget_sec=budget_sec,
     )
     pre_cmd = f"{quoted_bin} hook pre-tool{suffix}"
     post_cmd = f"{quoted_bin} hook post-tool{suffix}"
+    post_matcher = (
+        GEMINI_BUDGET_POST_TOOL_MATCHER
+        if (budget_sec is not None and budget_sec > 0)
+        else GEMINI_POST_TOOL_MATCHER
+    )
     return {
         "hooksConfig": {
             "enabled": True,
@@ -124,12 +179,36 @@ def build_nomos_gemini_hook_manifest(
             ],
             "AfterTool": [
                 {
-                    "matcher": GEMINI_POST_TOOL_MATCHER,
+                    "matcher": post_matcher,
                     "hooks": [
                         {
                             "name": "nomos-post-tool",
                             "type": "command",
                             "command": post_cmd,
+                            "timeout": 5000,
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+
+def build_vertex_media_guard_hook_manifest() -> dict[str, Any]:
+    """Build a `BeforeTool` guard preventing Gemini CLI Vertex HTTP 400 inline-media crashes."""
+    return {
+        "hooksConfig": {
+            "enabled": True,
+        },
+        "hooks": {
+            "BeforeTool": [
+                {
+                    "matcher": "read_file",
+                    "hooks": [
+                        {
+                            "name": "vertex-inline-media-guard",
+                            "type": "command",
+                            "command": VERTEX_INLINE_MEDIA_GUARD_SCRIPT,
                             "timeout": 5000,
                         }
                     ],

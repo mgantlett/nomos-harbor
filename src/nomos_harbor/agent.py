@@ -52,6 +52,10 @@ class NomosClaudeCodeOptions(ClaudeCodeOptions):
         default=True,
         description="Enable `--container-sandbox` anti-reward-hacking mode when `hermetic_dir` is unset.",
     )
+    budget_sec: int | None = Field(
+        default=None,
+        description="Optional session wall-clock budget in seconds for 75%/90% Nomos PostToolUse advisories.",
+    )
 
     @field_validator("nomos_binary_path")
     @classmethod
@@ -85,6 +89,7 @@ class NomosClaudeCode(ClaudeCode):
             nomos_bin=DEFAULT_REMOTE_NOMOS_BIN,
             hermetic_dir=self.options.hermetic_dir,
             container_sandbox=self.options.container_sandbox,
+            budget_sec=self.options.budget_sec,
         )
         if self.config_source is not None:
             self._base_settings = merge_hook_manifests(
