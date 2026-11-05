@@ -225,13 +225,16 @@ class VertexGeminiCli(GeminiCli):
         )
         await environment.upload_file(adc_path, remote_adc)
         if environment.default_user is not None:
-            await self.exec_as_root(
-                environment,
-                command=f"chown {environment.default_user} {shlex.quote(remote_adc)}",
-            )
-        await self.exec_as_agent(
+            owner = str(environment.default_user)
+        else:
+            uid_probe = await self.exec_as_agent(environment, command="id -u")
+            owner = (uid_probe.stdout or "").strip() or "0"
+        await self.exec_as_root(
             environment,
-            command=f"chmod 600 {shlex.quote(remote_adc)}",
+            command=(
+                f"chown {shlex.quote(owner)} {shlex.quote(remote_adc)} && "
+                f"chmod 600 {shlex.quote(remote_adc)}"
+            ),
         )
 
     @override

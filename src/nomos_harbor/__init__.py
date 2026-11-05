@@ -13,7 +13,7 @@ from nomos_harbor.hooks import (
     resolve_trial_budget_seconds,
 )
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 __all__ = [
     "DEFAULT_INSTALL_URL",
