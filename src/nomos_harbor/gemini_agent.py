@@ -32,6 +32,7 @@ from nomos_harbor.hooks import (
     build_vertex_media_guard_hook_manifest,
     merge_hook_manifests,
     parse_combined_version,
+    resolve_trial_budget_seconds,
 )
 
 
@@ -97,6 +98,10 @@ class NomosGeminiCliOptions(VertexGeminiCliOptions):
     budget_sec: int | None = Field(
         default=None,
         description="Optional session wall-clock budget in seconds for 75%/90% Nomos AfterTool advisories.",
+    )
+    auto_budget_radar: bool = Field(
+        default=True,
+        description="Automatically derive `--budget-sec` from each Harbor trial's `task.toml` timeout when `budget_sec` is unset.",
     )
 
     @field_validator("nomos_binary_path")
@@ -311,11 +316,16 @@ class NomosGeminiCli(VertexGeminiCli):
     def __init__(self, logs_dir: Path, *args: Any, **kwargs: Any) -> None:
         """Initialize `VertexGeminiCli` and construct the deterministic Nomos Gemini hook manifest."""
         super().__init__(logs_dir, *args, **kwargs)
+        effective_budget = resolve_trial_budget_seconds(
+            logs_dir=logs_dir,
+            explicit_budget_sec=self.options.budget_sec,
+            auto_budget_radar=self.options.auto_budget_radar,
+        )
         self._nomos_manifest = build_nomos_gemini_hook_manifest(
             nomos_bin=DEFAULT_REMOTE_NOMOS_BIN,
             hermetic_dir=self.options.hermetic_dir,
             container_sandbox=self.options.container_sandbox,
-            budget_sec=self.options.budget_sec,
+            budget_sec=effective_budget,
         )
 
     def _resolve_local_nomos_binary(self) -> Path | None:

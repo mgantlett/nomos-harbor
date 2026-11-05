@@ -9,8 +9,9 @@ Designed for reproducible, apples-to-apples paired Harbor evaluations (`Control`
 1. **100% Native Harbor Auth, Trajectory & Cost Parity:** Subclasses Harbor's official `ClaudeCode` (`NomosClaudeCode` -> `agent.name = "nomos-claude-code"`) and `GeminiCli` (`NomosGeminiCli` -> `agent.name = "nomos-gemini-cli"`), reusing Harbor's built-in model parsing, credential resolution (`agent_auth_resolution`), ATIF `trajectory.json` conversion, and token/cost accounting.
 2. **Runtime Anti-Reward-Hacking Guard (`--container-sandbox`):** Physically blocks reads, writes, directory listings, searches, and shell commands targeting Harbor's protected `/logs/verifier` (`reward.txt` / `reward.json`), `/solution`, and root `/tests` directories while allowing legitimate OS-wide sysadmin paths (`/etc`, `/tmp`, `/var`, `sqlite3`).
 3. **Zero `/app` Workspace Pollution:** Injects `nomos hook` additively into `$CLAUDE_CONFIG_DIR/settings.json` (`PreToolUse` / `PostToolUse`) or `~/.gemini/settings.json` (`BeforeTool` / `AfterTool`) outside `/app`, keeping `/app` completely clean for strict workspace verifiers and Harbor's `/judge` supervisor.
-4. **Native Google Cloud Vertex AI ADC Bridge (`$0` API Key Setup):** `VertexGeminiCli` (stock Control baseline) and `NomosGeminiCli` (Treatment arm) automatically detect `gcloud auth application-default login` credentials on the host, stage an ephemeral `0600` credential inside `/tmp/gemini-secrets/adc.json` for `vertex_ai/gemini-*` runs, auto-resolve `quota_project_id` and `global` Vertex endpoints, and wipe `/tmp/gemini-secrets` on teardown.
-5. **Flexible Binary Provisioning:** Downloads the official `nomos` static Linux binary via `https://sophialabs.ca/install` by default (reproducible on any cloud sandbox or macOS/Linux runner), or uploads a local static Linux binary in `<50ms` via `--ak nomos_binary_path=/path/to/nomos` (or `NOMOS_HARBOR_BINARY`).
+4. **Native Google Cloud Vertex AI ADC Bridge (`$0` API Key Setup):** `VertexGeminiCli` (stock Control baseline) and `NomosGeminiCli` (Treatment arm) automatically detect `gcloud auth application-default login` credentials on the host, strip conflicting ambient `GEMINI_API_KEY` / `GOOGLE_API_KEY` variables, stage an ephemeral `0600` credential inside `/tmp/gemini-secrets/adc.json` for `vertex_ai/gemini-*` runs, enforce `NODE_OPTIONS=--dns-result-order=ipv4first` to prevent Node 22 Docker bridge IPv6 stalls, recover EOL Debian `apt` mirrors via `archive.debian.org`, guard Vertex inline-media `HTTP 400` crashes, and wipe `/tmp/gemini-secrets` on teardown.
+5. **Automatic Per-Task Wall-Clock Budget Radar (`--budget-sec`):** Automatically reads each Harbor trial's `task.toml` `[agent] timeout_sec` (scaled by `timeout_multiplier`) and wires `nomos hook --budget-sec <seconds>` so agents receive deduplicated `75%` and `90%` elapsed wall-clock advisories before hitting `AgentTimeoutError`.
+6. **Flexible Binary Provisioning:** Downloads the official `nomos` static Linux binary via `https://sophialabs.ca/install` by default (reproducible on any cloud sandbox or macOS/Linux runner), or uploads a local static Linux binary in `<50ms` via `--ak nomos_binary_path=/path/to/nomos` (or `NOMOS_HARBOR_BINARY`).
 
 ## Quickstart (Paired Control vs. Treatment)
 
@@ -33,11 +34,14 @@ harbor run --dataset terminal-bench@2.0 \
   --model vertex_ai/gemini-3.5-flash \
   --n-concurrent 4
 
-# Treatment Arm (Gemini CLI + Nomos Governance Hooks)
-harbor run --dataset terminal-bench@2.0 \
+# Treatment Arm (Gemini CLI + Nomos Governance Hooks - Recommended Vertex DSQ Concurrency)
+env -u GEMINI_API_KEY -u GOOGLE_API_KEY \
+  harbor run --dataset terminal-bench@2.0 \
   --agent nomos_harbor:NomosGeminiCli \
   --model vertex_ai/gemini-3.5-flash \
-  --n-concurrent 4
+  --n-concurrent 4 \
+  --n-concurrent-agents 3 \
+  --max-retries 3
 ```
 
 ### Option B: Claude Code (`ANTHROPIC_API_KEY`)

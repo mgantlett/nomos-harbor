@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import shlex
+import tomllib
+from pathlib import Path
 from typing import Any
 
 DEFAULT_INSTALL_URL = "https://sophialabs.ca/install"
@@ -62,6 +65,51 @@ EOL_DEBIAN_APT_REPAIR_COMMAND = (
     "rm -rf /var/lib/apt/lists/*"
 )
 SEMVER_RE = re.compile(r"(\d+\.\d+\.\d+)")
+
+
+def resolve_trial_budget_seconds(
+    logs_dir: Path | None,
+    explicit_budget_sec: int | None = None,
+    auto_budget_radar: bool = True,
+) -> int | None:
+    """Resolve effective session budget seconds from explicit `--ak` or cached Harbor `task.toml`."""
+    if explicit_budget_sec is not None and explicit_budget_sec > 0:
+        return int(explicit_budget_sec)
+    if not auto_budget_radar or logs_dir is None:
+        return None
+    trial_cfg_path = logs_dir.parent / "config.json"
+    if not trial_cfg_path.is_file():
+        return None
+    try:
+        cfg = json.loads(trial_cfg_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    multiplier = float(cfg.get("timeout_multiplier") or 1.0)
+    agent_cfg = cfg.get("agent") if isinstance(cfg.get("agent"), dict) else {}
+    override_sec = agent_cfg.get("override_timeout_sec")
+    if isinstance(override_sec, (int, float)) and override_sec > 0:
+        return max(1, int(float(override_sec) * multiplier))
+    task_cfg = cfg.get("task") if isinstance(cfg.get("task"), dict) else {}
+    task_path = str(task_cfg.get("path") or "").strip().strip("/")
+    if not task_path:
+        return None
+    cache_base = Path(
+        os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
+    ).expanduser()
+    tasks_cache = cache_base / "harbor" / "tasks"
+    if not tasks_cache.is_dir():
+        return None
+    for candidate in tasks_cache.glob(f"*/{task_path}/task.toml"):
+        try:
+            parsed = tomllib.loads(candidate.read_text(encoding="utf-8"))
+            raw_timeout = (parsed.get("agent") or {}).get("timeout_sec")
+            if isinstance(raw_timeout, (int, float)) and raw_timeout > 0:
+                return max(1, int(float(raw_timeout) * multiplier))
+        except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
+            continue
+    return None
 
 
 def _build_hook_flag_suffix(

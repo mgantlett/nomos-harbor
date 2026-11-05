@@ -22,6 +22,7 @@ from nomos_harbor.hooks import (  # noqa: E402
     build_nomos_install_command,
     merge_hook_manifests,
     parse_combined_version,
+    resolve_trial_budget_seconds,
 )
 
 
@@ -113,6 +114,38 @@ class TestNomosHarborHooks(unittest.TestCase):
             "0.36.0+nomos-4.5.1",
         )
         self.assertEqual(parse_combined_version("2.1.220 (Claude Code)"), "2.1.220")
+
+    def test_resolve_trial_budget_seconds_reads_cached_task_toml(self) -> None:
+        """Verify automatic per-trial timeout discovery from Harbor's cached `task.toml`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_dir = root / "xdg_cache"
+            task_dir = cache_dir / "harbor" / "tasks" / "abc123" / "mailman"
+            task_dir.mkdir(parents=True)
+            (task_dir / "task.toml").write_text(
+                '[agent]\ntimeout_sec = 1800.0\n', encoding="utf-8"
+            )
+            trial_dir = root / "mailman__trial1"
+            logs_dir = trial_dir / "agent"
+            logs_dir.mkdir(parents=True)
+            (trial_dir / "config.json").write_text(
+                json.dumps({"task": {"path": "mailman"}, "timeout_multiplier": 1.5}),
+                encoding="utf-8",
+            )
+            prev_xdg = sys.modules["os"].environ.get("XDG_CACHE_HOME")
+            sys.modules["os"].environ["XDG_CACHE_HOME"] = str(cache_dir)
+            try:
+                resolved = resolve_trial_budget_seconds(logs_dir)
+                self.assertEqual(resolved, 2700)
+                self.assertEqual(resolve_trial_budget_seconds(logs_dir, 600), 600)
+                self.assertIsNone(
+                    resolve_trial_budget_seconds(logs_dir, None, auto_budget_radar=False)
+                )
+            finally:
+                if prev_xdg is None:
+                    sys.modules["os"].environ.pop("XDG_CACHE_HOME", None)
+                else:
+                    sys.modules["os"].environ["XDG_CACHE_HOME"] = prev_xdg
 
 
 class _FakeEnvironment:
