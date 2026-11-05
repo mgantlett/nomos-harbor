@@ -316,8 +316,12 @@ class NomosGeminiCli(VertexGeminiCli):
     def __init__(self, logs_dir: Path, *args: Any, **kwargs: Any) -> None:
         """Initialize `VertexGeminiCli` and construct the deterministic Nomos Gemini hook manifest."""
         super().__init__(logs_dir, *args, **kwargs)
+        self._nomos_manifest = self._current_nomos_manifest()
+
+    def _current_nomos_manifest(self) -> dict[str, Any]:
+        """Build the Nomos Gemini hook manifest using latest `config.json` / `lock.json` state."""
         effective_budget = resolve_trial_budget_seconds(
-            logs_dir=logs_dir,
+            logs_dir=self.logs_dir,
             explicit_budget_sec=self.options.budget_sec,
             auto_budget_radar=self.options.auto_budget_radar,
         )
@@ -327,6 +331,7 @@ class NomosGeminiCli(VertexGeminiCli):
             container_sandbox=self.options.container_sandbox,
             budget_sec=effective_budget,
         )
+        return self._nomos_manifest
 
     def _resolve_local_nomos_binary(self) -> Path | None:
         """Resolve an optional host-side Linux `nomos` binary for fast offline upload."""
@@ -357,7 +362,7 @@ class NomosGeminiCli(VertexGeminiCli):
             if base_config is not None
             else {"experimental": {"skills": True}}
         )
-        merged = merge_hook_manifests(seed, self._nomos_manifest)
+        merged = merge_hook_manifests(seed, self._current_nomos_manifest())
         if self.options.vertex_media_guard and (
             auth_type == "vertex-ai" or self._is_vertex_mode()
         ):
@@ -389,7 +394,7 @@ class NomosGeminiCli(VertexGeminiCli):
 
         baseline = merge_hook_manifests(
             {"experimental": {"skills": True}},
-            self._nomos_manifest,
+            self._current_nomos_manifest(),
         )
         escaped = shlex.quote(json.dumps(baseline, indent=2) + "\n")
         await self.exec_as_agent(

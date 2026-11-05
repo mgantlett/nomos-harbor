@@ -90,8 +90,17 @@ class NomosClaudeCode(ClaudeCode):
     def __init__(self, logs_dir: Path, *args: Any, **kwargs: Any) -> None:
         """Initialize `ClaudeCode` and pre-merge Nomos hooks into any explicit `--settings`."""
         super().__init__(logs_dir, *args, **kwargs)
+        self._nomos_manifest = self._current_nomos_manifest()
+        if self.config_source is not None:
+            self._base_settings = merge_hook_manifests(
+                self._base_settings,
+                self._nomos_manifest,
+            )
+
+    def _current_nomos_manifest(self) -> dict[str, Any]:
+        """Build the Nomos Claude hook manifest using latest `config.json` / `lock.json` state."""
         effective_budget = resolve_trial_budget_seconds(
-            logs_dir=logs_dir,
+            logs_dir=self.logs_dir,
             explicit_budget_sec=self.options.budget_sec,
             auto_budget_radar=self.options.auto_budget_radar,
         )
@@ -101,11 +110,7 @@ class NomosClaudeCode(ClaudeCode):
             container_sandbox=self.options.container_sandbox,
             budget_sec=effective_budget,
         )
-        if self.config_source is not None:
-            self._base_settings = merge_hook_manifests(
-                self._base_settings,
-                self._nomos_manifest,
-            )
+        return self._nomos_manifest
 
     def _resolve_local_nomos_binary(self) -> Path | None:
         """Resolve an optional host-side Linux `nomos` binary for fast offline upload."""
@@ -152,7 +157,7 @@ class NomosClaudeCode(ClaudeCode):
         ).as_posix()
         merged_session_settings = merge_hook_manifests(
             self._base_settings if self.config_source is not None else None,
-            self._nomos_manifest,
+            self._current_nomos_manifest(),
         )
         await self._upload_config_text(
             environment,

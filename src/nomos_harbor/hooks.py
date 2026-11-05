@@ -67,48 +67,109 @@ EOL_DEBIAN_APT_REPAIR_COMMAND = (
 SEMVER_RE = re.compile(r"(\d+\.\d+\.\d+)")
 
 
+def _read_json_dict(path: Path) -> dict[str, Any]:
+    """Read a JSON object from `path`, returning `{}` on missing or invalid data."""
+    if not path.is_file():
+        return {}
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _read_task_toml_timeout(path: Path) -> float | None:
+    """Extract positive `[agent].timeout_sec` from a `task.toml` file if present."""
+    if not path.is_file():
+        return None
+    try:
+        parsed = tomllib.loads(path.read_text(encoding="utf-8"))
+        raw_timeout = (parsed.get("agent") or {}).get("timeout_sec")
+        if isinstance(raw_timeout, (int, float)) and raw_timeout > 0:
+            return float(raw_timeout)
+    except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
+        return None
+    return None
+
+
 def resolve_trial_budget_seconds(
     logs_dir: Path | None,
     explicit_budget_sec: int | None = None,
     auto_budget_radar: bool = True,
 ) -> int | None:
-    """Resolve effective session budget seconds from explicit `--ak` or cached Harbor `task.toml`."""
+    """Resolve effective session budget seconds from `--ak`, `config.json`, `lock.json`, and `task.toml`."""
     if explicit_budget_sec is not None and explicit_budget_sec > 0:
         return int(explicit_budget_sec)
     if not auto_budget_radar or logs_dir is None:
         return None
-    trial_cfg_path = logs_dir.parent / "config.json"
-    if not trial_cfg_path.is_file():
+
+    trial_dir = logs_dir.parent
+    cfg = _read_json_dict(trial_dir / "config.json")
+    lock = _read_json_dict(trial_dir / "lock.json")
+    if not cfg and not lock:
         return None
-    try:
-        cfg = json.loads(trial_cfg_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(cfg, dict):
-        return None
-    multiplier = float(cfg.get("timeout_multiplier") or 1.0)
+
+    raw_mult = (
+        cfg.get("agent_timeout_multiplier")
+        or lock.get("agent_timeout_multiplier")
+        or cfg.get("timeout_multiplier")
+        or lock.get("timeout_multiplier")
+        or 1.0
+    )
+    multiplier = float(raw_mult) if isinstance(raw_mult, (int, float)) and raw_mult > 0 else 1.0
+
     agent_cfg = cfg.get("agent") if isinstance(cfg.get("agent"), dict) else {}
-    override_sec = agent_cfg.get("override_timeout_sec")
+    agent_lock = lock.get("agent") if isinstance(lock.get("agent"), dict) else {}
+    max_sec_raw = agent_cfg.get("max_timeout_sec") or agent_lock.get("max_timeout_sec")
+    max_sec = float(max_sec_raw) if isinstance(max_sec_raw, (int, float)) and max_sec_raw > 0 else None
+
+    def _cap_and_scale(base_sec: float) -> int:
+        bounded = min(base_sec, max_sec) if max_sec is not None else base_sec
+        return max(1, int(bounded * multiplier))
+
+    override_sec = agent_cfg.get("override_timeout_sec") or agent_lock.get("override_timeout_sec")
     if isinstance(override_sec, (int, float)) and override_sec > 0:
-        return max(1, int(float(override_sec) * multiplier))
+        return _cap_and_scale(float(override_sec))
+
     task_cfg = cfg.get("task") if isinstance(cfg.get("task"), dict) else {}
-    task_path = str(task_cfg.get("path") or "").strip().strip("/")
-    if not task_path:
-        return None
+    task_lock = lock.get("task") if isinstance(lock.get("task"), dict) else {}
+    task_path = str(task_cfg.get("path") or task_lock.get("path") or "").strip()
+    task_name = str(task_cfg.get("name") or task_lock.get("name") or "").strip().strip("/")
+    digest = str(task_cfg.get("ref") or task_lock.get("digest") or "").strip()
+    digest_hex = digest.removeprefix("sha256:") if digest.startswith("sha256:") else ""
+
+    if task_path:
+        local_toml = Path(task_path).expanduser() / "task.toml"
+        found = _read_task_toml_timeout(local_toml)
+        if found is not None:
+            return _cap_and_scale(found)
+
     cache_base = Path(
         os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
     ).expanduser()
     tasks_cache = cache_base / "harbor" / "tasks"
     if not tasks_cache.is_dir():
         return None
-    for candidate in tasks_cache.glob(f"*/{task_path}/task.toml"):
-        try:
-            parsed = tomllib.loads(candidate.read_text(encoding="utf-8"))
-            raw_timeout = (parsed.get("agent") or {}).get("timeout_sec")
-            if isinstance(raw_timeout, (int, float)) and raw_timeout > 0:
-                return max(1, int(float(raw_timeout) * multiplier))
-        except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
-            continue
+
+    candidates: list[Path] = []
+    if "/" in task_name:
+        org, pkg_name = task_name.split("/", 1)
+        pkg_root = tasks_cache / "packages" / org / pkg_name
+        if digest_hex:
+            candidates.append(pkg_root / digest_hex / "task.toml")
+        if pkg_root.is_dir():
+            candidates.extend(sorted(pkg_root.glob("*/task.toml")))
+
+    clean_rel = task_path.strip("/")
+    if clean_rel:
+        candidates.extend(sorted(tasks_cache.glob(f"*/{clean_rel}/task.toml")))
+    if task_name and "/" not in task_name and task_name != clean_rel:
+        candidates.extend(sorted(tasks_cache.glob(f"*/{task_name}/task.toml")))
+
+    for candidate in candidates:
+        found = _read_task_toml_timeout(candidate)
+        if found is not None:
+            return _cap_and_scale(found)
     return None
 
 

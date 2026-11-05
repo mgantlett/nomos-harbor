@@ -10,9 +10,10 @@ from nomos_harbor.hooks import (
     build_nomos_install_command,
     merge_hook_manifests,
     parse_combined_version,
+    resolve_trial_budget_seconds,
 )
 
-__version__ = "0.2.2"
+__version__ = "0.3.2"
 
 __all__ = [
     "DEFAULT_INSTALL_URL",

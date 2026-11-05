@@ -141,6 +141,31 @@ class TestNomosHarborHooks(unittest.TestCase):
                 self.assertIsNone(
                     resolve_trial_budget_seconds(logs_dir, None, auto_budget_radar=False)
                 )
+
+                pkg_hash = "0" * 64
+                pkg_dir = (
+                    cache_dir / "harbor" / "tasks" / "packages" / "terminal-bench" / "foo-task" / pkg_hash
+                )
+                pkg_dir.mkdir(parents=True)
+                (pkg_dir / "task.toml").write_text(
+                    "[agent]\ntimeout_sec = 28800.0\n", encoding="utf-8"
+                )
+                pkg_trial = root / "foo-task__trial2"
+                pkg_logs = pkg_trial / "agent"
+                pkg_logs.mkdir(parents=True)
+                (pkg_trial / "lock.json").write_text(
+                    json.dumps(
+                        {
+                            "task": {
+                                "name": "terminal-bench/foo-task",
+                                "digest": f"sha256:{pkg_hash}",
+                            },
+                            "agent": {"max_timeout_sec": 1800.0},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                self.assertEqual(resolve_trial_budget_seconds(pkg_logs), 1800)
             finally:
                 if prev_xdg is None:
                     sys.modules["os"].environ.pop("XDG_CACHE_HOME", None)
