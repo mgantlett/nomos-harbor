@@ -1,0 +1,125 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mgantlett/nomos/v4.8.0/nomos.schema.json
+# ==============================================================================
+# Nomos Ecosystem Configuration (nomos.yaml)
+# Single Source of Truth (SSoT) for Deterministic AI Agent Governance (Law 4)
+# ==============================================================================
+# Configures the Nomos control harness, hermetic worktree isolation, bilateral
+# plane boundaries, and Definition of Done (DoD) quality gates for Tier 1 agents.
+#
+# Documentation: https://github.com/mgantlett/nomos
+# ==============================================================================
+
+# Canonical repository metadata
+project: "nomos-harbor"
+default_branch: "main"
+
+governance:
+    # --------------------------------------------------------------------------
+    # Law 1 (Architectural & Capability Boundary):
+    # Enforces package import boundaries and CLI command surface restrictions.
+    # --------------------------------------------------------------------------
+    boundary:
+        enforce: true
+
+        # Optional: Ban specific Go import prefixes across repository packages
+        # (e.g., prevent domain packages from importing deprecated or UI layers)
+        # prohibited_packages:
+        #     - "internal/legacy"
+
+        # Optional: Ban specific CLI subcommand names from Cobra registration
+        # prohibited_commands:
+        #     - "unsafe-eval"
+
+        # Optional: Block unapproved mutations to dependency manifests & lockfiles
+        # (go.mod, package.json, Cargo.toml, pyproject.toml, uv.lock, etc.)
+        # lock_dependencies: true
+
+    # --------------------------------------------------------------------------
+    # Law 2, 4, 5, 6 & 7 (Deterministic AST & Runtime Quality Gates):
+    # Machine-enforced across supported polyglot languages (Go, TS, JS, Svelte,
+    # Python, Rust, C, C++).
+    # --------------------------------------------------------------------------
+    quality_gates:
+        # When true (recommended), prevents AI agents from relaxing thresholds
+        # below statutory baselines (max_file_loc<=400, max_func_loc<=60,
+        # max_cyclomatic_complexity<=15, min_test_coverage_pct>=55).
+        # Set to false only when intentionally customizing brownfield baselines.
+        strict_mode: true
+
+        # Optional: Require bound Intent (INT-N) twins on Substrate (SUB-N) commits.
+        # Options: "off" (default), "feat" (require INT twin on feat commits), "strict" (all SUB commits).
+        # intent_twin_mode: "off"
+
+        # Automatically execute local polyglot syntax & test toolchains when present
+        # (Python py_compile/pytest, TypeScript tsc --noEmit, Rust cargo check).
+        polyglot_toolchains: true
+
+        # Optional: Exclude generated, vendored, or third-party build paths
+        # exclude:
+        #     - "dist"
+        #     - "vendor"
+        #     - "generated"
+
+        # Optional: Custom 2-plane roots (Law 7 Plane Separation).
+        # Defaults to "intent" (specs/ADRs/contracts) and "substrate" (code).
+        # For brownfield repositories, map your existing directories:
+        # intent_source_roots:
+        #     - "docs"
+        #     - "specs"
+        # substrate_source_roots:
+        #     - "src"
+        #     - "cmd"
+
+        # Optional: Reject custom placeholder tokens in source files (Law 2 Anti-Shim)
+        # forbidden_shims:
+        #     - "TODO_IMPLEMENT"
+        #     - "NotImplementedError"
+
+        # Numerical AST & test hygiene thresholds
+        thresholds:
+            max_file_loc: 400                  # Max lines of code per source file
+            max_func_loc: 60                   # Max lines of code per function
+            max_cyclomatic_complexity: 15      # Max cyclomatic branch complexity per function
+            max_cognitive_debt_score: 45       # Max composite file cognitive debt score (CDS)
+            min_comment_density_pct: 10        # Min exported symbol docstring density (0-100%)
+            min_test_coverage_pct: 55          # Min statement test coverage (0-100%)
+            min_clone_lines: 18                # Min AST function lines for Type-2 clone detection
+            max_func_params: 8                 # Max function parameter arity before struct grouping
+            max_magic_string_duplication: 10   # Max repeated string literal occurrences per package
+
+        # Law 5 (The Zero-Hardcoded-Path Law):
+        # Rejects hardcoded developer machine home paths in source code.
+        # Add project-specific forbidden strings or set to [] to disable.
+        forbidden_literals:
+            - '"/home/'
+            - '"/Users/'
+            - '"/var/home/'
+
+        # Optional: Cross-plane JSON Schema contract, UI membrane, & env ingress verification (Law 4 & 5)
+        # contracts:
+        #     auto_promote: false
+        #     contracts:
+        #         enabled: true
+        #         spec_roots:
+        #             - "intent/architecture/specs"
+        #         schema_files:
+        #             - "nomos.schema.json"
+        #         backend_roots:
+        #             - "substrate"
+        #         strict_types: true
+        #     membrane:
+        #         enabled: false
+        #         frontend_roots:
+        #             - "web/src"
+        #         backend_dto_roots:
+        #             - "internal/api"
+        #         banish_defensive_masks: true
+        #         fail_on_contract_drift: true
+        #     infra:
+        #         enabled: true
+        #         ingress_configs:
+        #             - "deploy/Caddyfile"
+        #         env_declarations:
+        #             - ".env.example"
+        #         port_scan: true
+        #         fail_on_orphan_env: true

@@ -5,3 +5,11 @@ __pycache__/
 dist/
 build/
 .venv/
+
+# Nomos Operational Boundaries
+/worktrees/
+/.tmp/
+/.vscode/
+/.nomos/
+/go.work
+/go.work.sum

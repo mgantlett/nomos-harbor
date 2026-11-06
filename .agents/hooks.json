@@ -1,0 +1,64 @@
+{
+  "session-handshake": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "./scripts/session-start.sh",
+        "timeout": 10
+      }
+    ]
+  },
+  "worktree-boundary-guard": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "replace_file_content|multi_replace_file_content|write_to_file|edit_file|write_file|read_file|Write|Edit|MultiEdit|Read|WebFetch|WebSearch|search_web|mcp_.*|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/worktree-guard.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "prevent-manual-build": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "run_command|Bash|bash|execute_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/nomos-build-guard.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "post-edit-ast-radar": {
+    "enabled": true,
+    "PostToolUse": [
+      {
+        "matcher": "replace_file_content|multi_replace_file_content|write_to_file|edit_file|write_file|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/post-edit-radar.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "./scripts/post-edit-radar.sh",
+        "timeout": 5
+      }
+    ]
+  }
+}
