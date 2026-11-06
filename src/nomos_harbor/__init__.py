@@ -14,16 +14,15 @@ from nomos_harbor.hooks import (
     parse_combined_version,
     resolve_trial_budget_seconds,
 )
-from nomos_harbor.mcts_profiles import (
+from nomos_harbor.mcts_features import extract_trial_features, load_job_corpus
+from nomos_harbor.mcts_models import (
     MODEL_ADVISORY_PROFILES,
     MCTSOptimizationReport,
     ModelAdvisoryProfile,
     TrialTrajectoryFeatures,
-    extract_trial_features,
-    load_job_corpus,
-    optimize_profile_mcts,
     resolve_model_advisory_profile,
 )
+from nomos_harbor.mcts_search import optimize_profile_mcts
 
 __version__ = "0.4.0"
 
