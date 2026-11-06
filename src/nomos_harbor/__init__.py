@@ -5,6 +5,8 @@ from __future__ import annotations
 from nomos_harbor.hooks import (
     DEFAULT_INSTALL_URL,
     DEFAULT_REMOTE_NOMOS_BIN,
+    build_claude_web_search_guard_settings,
+    build_gemini_tool_hygiene_settings,
     build_nomos_gemini_hook_manifest,
     build_nomos_hook_manifest,
     build_nomos_install_command,
@@ -12,26 +14,47 @@ from nomos_harbor.hooks import (
     parse_combined_version,
     resolve_trial_budget_seconds,
 )
+from nomos_harbor.mcts_profiles import (
+    MODEL_ADVISORY_PROFILES,
+    MCTSOptimizationReport,
+    ModelAdvisoryProfile,
+    TrialTrajectoryFeatures,
+    extract_trial_features,
+    load_job_corpus,
+    optimize_profile_mcts,
+    resolve_model_advisory_profile,
+)
 
-__version__ = "0.3.3"
+__version__ = "0.4.0"
 
 __all__ = [
     "DEFAULT_INSTALL_URL",
     "DEFAULT_REMOTE_NOMOS_BIN",
+    "MCTSOptimizationReport",
+    "MODEL_ADVISORY_PROFILES",
+    "ModelAdvisoryProfile",
     "NomosClaudeCode",
     "NomosClaudeCodeAgent",
     "NomosClaudeCodeOptions",
     "NomosGeminiCli",
     "NomosGeminiCliAgent",
     "NomosGeminiCliOptions",
+    "TrialTrajectoryFeatures",
     "VertexGeminiCli",
     "VertexGeminiCliOptions",
     "__version__",
+    "build_claude_web_search_guard_settings",
+    "build_gemini_tool_hygiene_settings",
     "build_nomos_gemini_hook_manifest",
     "build_nomos_hook_manifest",
     "build_nomos_install_command",
+    "extract_trial_features",
+    "load_job_corpus",
     "merge_hook_manifests",
+    "optimize_profile_mcts",
     "parse_combined_version",
+    "resolve_model_advisory_profile",
+    "resolve_trial_budget_seconds",
 ]
 
 

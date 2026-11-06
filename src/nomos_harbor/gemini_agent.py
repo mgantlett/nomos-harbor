@@ -5,8 +5,10 @@ Provides two clean subclasses of Harbor's official `GeminiCli` agent:
    ephemeral container staging of host Google Application Default Credentials (`gcloud` ADC)
    so paired Control baselines can run against GCP Vertex AI credits inside Docker.
 2. `NomosGeminiCli`: Extends `VertexGeminiCli` (`agent.name = "nomos-gemini-cli"`) by
-   installing `/usr/local/bin/nomos` and additively merging deterministic `BeforeTool` and
-   `AfterTool` Nomos hooks into `~/.gemini/settings.json` outside `/app`.
+   installing `/usr/local/bin/nomos`, applying MCTS-calibrated model advisory profiles,
+   excluding `google_web_search`/`cli_help` subagent spirals via documented `settings.json`
+   controls, and additively merging deterministic `BeforeTool` and `AfterTool` Nomos hooks
+   outside `/app`.
 """
 
 from __future__ import annotations
@@ -27,12 +29,18 @@ from nomos_harbor.hooks import (
     DEFAULT_INSTALL_URL,
     DEFAULT_REMOTE_NOMOS_BIN,
     EOL_DEBIAN_APT_REPAIR_COMMAND,
+    LOGS_ROOT_HYGIENE_COMMAND,
+    build_gemini_tool_hygiene_settings,
     build_nomos_gemini_hook_manifest,
     build_nomos_install_command,
     build_vertex_media_guard_hook_manifest,
     merge_hook_manifests,
     parse_combined_version,
     resolve_trial_budget_seconds,
+)
+from nomos_harbor.mcts_profiles import (
+    ModelAdvisoryProfile,
+    resolve_model_advisory_profile,
 )
 
 
@@ -73,7 +81,7 @@ class NomosGeminiCliOptions(VertexGeminiCliOptions):
 
     nomos_version: str | None = Field(
         default=None,
-        description="Optional Nomos release tag (e.g. v4.5.1) when downloading via HTTPS.",
+        description="Optional Nomos release tag (e.g. v4.8.0) when downloading via HTTPS.",
     )
     nomos_binary_path: str | None = Field(
         default=None,
@@ -95,13 +103,45 @@ class NomosGeminiCliOptions(VertexGeminiCliOptions):
         default=True,
         description="Enable BeforeTool guard preventing Gemini CLI Vertex HTTP 400 crashes on binary read_file.",
     )
+    disable_web_search: bool = Field(
+        default=True,
+        description="Exclude `google_web_search` and `web_fetch` in Gemini `settings.json` by default.",
+    )
+    exclude_cli_help: bool = Field(
+        default=True,
+        description="Disable Gemini CLI's `cli_help` subagent (`agents.overrides.cli_help.enabled=false` and `tools.exclude`).",
+    )
+    gemini_taint_guidance: bool = Field(
+        default=True,
+        description="Inject concise SessionStart guidance for headless Gemini CLI `<untrusted_context>` shell path checks.",
+    )
     budget_sec: int | None = Field(
         default=None,
-        description="Optional session wall-clock budget in seconds for 75%/90% Nomos AfterTool advisories.",
+        description="Optional session wall-clock budget in seconds for Nomos AfterTool advisories.",
     )
     auto_budget_radar: bool = Field(
         default=True,
         description="Automatically derive `--budget-sec` from each Harbor trial's `task.toml` timeout when `budget_sec` is unset.",
+    )
+    advisory_profile: str | None = Field(
+        default=None,
+        description="Optional MCTS-calibrated advisory profile override (`gemini`, `claude`, `gpt`, `default`).",
+    )
+    budget_warn_pct: int | None = Field(
+        default=None,
+        description="Optional budget warning checkpoint percentage [25..90] overriding the model profile.",
+    )
+    budget_crit_pct: int | None = Field(
+        default=None,
+        description="Optional budget critical checkpoint percentage [50..99] overriding the model profile.",
+    )
+    loop_strikes: int | None = Field(
+        default=None,
+        description="Optional identical-failure loop circuit-breaker threshold [2..10] overriding the model profile.",
+    )
+    advisory_style: str | None = Field(
+        default=None,
+        description="Optional AfterTool advisory style (`standard` or `terse`) overriding the model profile.",
     )
 
     @field_validator("nomos_binary_path")
@@ -114,6 +154,15 @@ class NomosGeminiCliOptions(VertexGeminiCliOptions):
         if not resolved.is_file():
             raise ValueError(f"nomos_binary_path does not exist: {resolved}")
         return str(resolved)
+
+    @field_validator("advisory_profile")
+    @classmethod
+    def _validate_advisory_profile(cls, value: str | None) -> str | None:
+        """Fail closed during Harbor preflight when an unknown profile name is supplied."""
+        if value is None or not value.strip():
+            return None
+        prof = resolve_model_advisory_profile(None, value)
+        return prof.name
 
 
 class VertexGeminiCli(GeminiCli):
@@ -321,8 +370,16 @@ class NomosGeminiCli(VertexGeminiCli):
         super().__init__(logs_dir, *args, **kwargs)
         self._nomos_manifest = self._current_nomos_manifest()
 
+    def _resolved_advisory_profile(self) -> ModelAdvisoryProfile:
+        """Resolve the calibrated MCTS `ModelAdvisoryProfile` for the active model."""
+        return resolve_model_advisory_profile(
+            model_name=getattr(self, "model_name", None),
+            explicit_profile=self.options.advisory_profile,
+        )
+
     def _current_nomos_manifest(self) -> dict[str, Any]:
         """Build the Nomos Gemini hook manifest using latest `config.json` / `lock.json` state."""
+        profile = self._resolved_advisory_profile()
         effective_budget = resolve_trial_budget_seconds(
             logs_dir=self.logs_dir,
             explicit_budget_sec=self.options.budget_sec,
@@ -333,6 +390,27 @@ class NomosGeminiCli(VertexGeminiCli):
             hermetic_dir=self.options.hermetic_dir,
             container_sandbox=self.options.container_sandbox,
             budget_sec=effective_budget,
+            budget_warn_pct=(
+                self.options.budget_warn_pct
+                if self.options.budget_warn_pct is not None
+                else profile.budget_warn_pct
+            ),
+            budget_crit_pct=(
+                self.options.budget_crit_pct
+                if self.options.budget_crit_pct is not None
+                else profile.budget_crit_pct
+            ),
+            loop_strikes=(
+                self.options.loop_strikes
+                if self.options.loop_strikes is not None
+                else profile.loop_strikes
+            ),
+            advisory_style=(
+                self.options.advisory_style
+                if self.options.advisory_style is not None
+                else profile.advisory_style
+            ),
+            gemini_taint_guidance=self.options.gemini_taint_guidance,
         )
         return self._nomos_manifest
 
@@ -356,7 +434,7 @@ class NomosGeminiCli(VertexGeminiCli):
         model: str | None = None,
         auth_type: str | None = None,
     ) -> tuple[dict[str, Any] | None, str | None]:
-        """Merge Nomos `BeforeTool`/`AfterTool` hooks first, followed by optional Vertex guards."""
+        """Merge tool hygiene, MCTS-calibrated Nomos hooks, and optional Vertex guards."""
         base_config, model_alias = GeminiCli._build_settings_config(
             self, model, auth_type
         )
@@ -365,7 +443,12 @@ class NomosGeminiCli(VertexGeminiCli):
             if base_config is not None
             else {"experimental": {"skills": True}}
         )
-        merged = merge_hook_manifests(seed, self._current_nomos_manifest())
+        hygiene = build_gemini_tool_hygiene_settings(
+            disable_web_search=self.options.disable_web_search,
+            exclude_cli_help=self.options.exclude_cli_help,
+        )
+        merged = merge_hook_manifests(seed, hygiene)
+        merged = merge_hook_manifests(merged, self._current_nomos_manifest())
         if self.options.vertex_media_guard and (
             auth_type == "vertex-ai" or self._is_vertex_mode()
         ):
@@ -384,6 +467,7 @@ class NomosGeminiCli(VertexGeminiCli):
             await self.exec_as_root(
                 environment,
                 command=(
+                    f"{LOGS_ROOT_HYGIENE_COMMAND}; "
                     f"chmod 755 {shlex.quote(DEFAULT_REMOTE_NOMOS_BIN)} && "
                     f"{shlex.quote(DEFAULT_REMOTE_NOMOS_BIN)} --version"
                 ),
@@ -393,13 +477,21 @@ class NomosGeminiCli(VertexGeminiCli):
                 nomos_version=self.options.nomos_version,
                 install_url=self.options.nomos_install_url,
             )
-            await self.exec_as_root(environment, command=install_cmd)
+            await self.exec_as_root(
+                environment,
+                command=f"{LOGS_ROOT_HYGIENE_COMMAND}; {install_cmd}",
+            )
 
-        baseline = merge_hook_manifests(
-            {"experimental": {"skills": True}},
-            self._current_nomos_manifest(),
+        baseline_cfg, _ = self._build_settings_config(
+            model=getattr(self, "model_name", None),
+            auth_type=self._resolve_env_auth_type(),
         )
-        escaped = shlex.quote(json.dumps(baseline, indent=2) + "\n")
+        if baseline_cfg is None:
+            baseline_cfg = merge_hook_manifests(
+                {"experimental": {"skills": True}},
+                self._current_nomos_manifest(),
+            )
+        escaped = shlex.quote(json.dumps(baseline_cfg, indent=2) + "\n")
         await self.exec_as_agent(
             environment,
             command=f"mkdir -p ~/.gemini && printf %s {escaped} > ~/.gemini/settings.json",
@@ -408,12 +500,13 @@ class NomosGeminiCli(VertexGeminiCli):
     def _stamp_trajectory_provenance(
         self, trajectory: Trajectory | None
     ) -> Trajectory | None:
-        """Stamp `nomos-gemini-cli` agent identity and sandbox metadata onto ATIF trajectories."""
+        """Stamp `nomos-gemini-cli` agent identity and MCTS profile onto ATIF trajectories."""
         if trajectory is not None and trajectory.agent is not None:
             trajectory.agent.name = self.name()
             extra = dict(trajectory.agent.extra or {})
             extra["harness_substrate"] = "nomos"
             extra["container_sandbox"] = self.options.container_sandbox
+            extra["advisory_profile"] = self._resolved_advisory_profile().name
             if self.options.hermetic_dir:
                 extra["hermetic_dir"] = self.options.hermetic_dir
             trajectory.agent.extra = extra
