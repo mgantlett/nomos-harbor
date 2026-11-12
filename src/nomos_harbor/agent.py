@@ -16,6 +16,7 @@ from typing import Any, override
 
 from harbor.agents.installed.claude_code import ClaudeCode, ClaudeCodeOptions
 from harbor.environments.base import BaseEnvironment
+from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Trajectory
 from pydantic import Field, field_validator
 
@@ -33,6 +34,11 @@ from nomos_harbor.hooks import (
 from nomos_harbor.mcts_profiles import (
     ModelAdvisoryProfile,
     resolve_model_advisory_profile,
+)
+from nomos_harbor.telemetry_funnel import (
+    HarborTrialSpend,
+    emit_harbor_trial_spend,
+    extract_context_or_trajectory_tokens,
 )
 
 
@@ -243,6 +249,27 @@ class NomosClaudeCode(ClaudeCode):
         )
 
     @override
+    async def run(
+        self, instruction: str, environment: BaseEnvironment, context: AgentContext
+    ) -> None:
+        """Execute Claude Code Harbor trial and emit verified post-trial cloud spend."""
+        try:
+            await super().run(instruction, environment, context)
+        finally:
+            p_tok, c_tok, cached_tok = extract_context_or_trajectory_tokens(context, self.logs_dir)
+            emit_harbor_trial_spend(
+                HarborTrialSpend(
+                    logs_dir=self.logs_dir,
+                    agent_name=self.name(),
+                    model_name=getattr(self, "model_name", None) or "anthropic/claude-sonnet-4-5",
+                    prompt_tokens=p_tok,
+                    completion_tokens=c_tok,
+                    cached_tokens=cached_tok,
+                    origin="anthropic",
+                )
+            )
+
+    @override
     def convert_trajectory(self, logs_dir: Path) -> Trajectory | None:
         """Preserve `nomos-claude-code` agent provenance inside ATIF `trajectory.json`."""
         trajectory = super().convert_trajectory(logs_dir)
@@ -255,6 +282,19 @@ class NomosClaudeCode(ClaudeCode):
             if self.options.hermetic_dir:
                 extra["hermetic_dir"] = self.options.hermetic_dir
             trajectory.agent.extra = extra
+        if trajectory is not None and trajectory.final_metrics is not None:
+            metrics = trajectory.final_metrics
+            emit_harbor_trial_spend(
+                HarborTrialSpend(
+                    logs_dir=logs_dir,
+                    agent_name=self.name(),
+                    model_name=getattr(self, "model_name", None) or "anthropic/claude-sonnet-4-5",
+                    prompt_tokens=int(getattr(metrics, "total_prompt_tokens", 0) or 0),
+                    completion_tokens=int(getattr(metrics, "total_completion_tokens", 0) or 0),
+                    cached_tokens=int(getattr(metrics, "total_cached_tokens", 0) or 0),
+                    origin="anthropic",
+                )
+            )
         return trajectory
 
     @override

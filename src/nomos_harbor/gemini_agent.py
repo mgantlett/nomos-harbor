@@ -46,6 +46,11 @@ from nomos_harbor.mcts_profiles import (
     ModelAdvisoryProfile,
     resolve_model_advisory_profile,
 )
+from nomos_harbor.telemetry_funnel import (
+    HarborTrialSpend,
+    emit_harbor_trial_spend,
+    extract_context_or_trajectory_tokens,
+)
 
 __all__ = [
     "NomosGeminiCli",
@@ -162,7 +167,7 @@ class VertexGeminiCli(GeminiCli):
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
-        """Stage Vertex ADC before invoking `GeminiCli.run` and ensure secret teardown."""
+        """Stage Vertex ADC before invoking `GeminiCli.run`, tear down secrets, and emit cloud spend."""
         await self._inject_vertex_adc(environment)
         try:
             await super().run(instruction, environment, context)
@@ -172,6 +177,18 @@ class VertexGeminiCli(GeminiCli):
                 await self.exec_as_agent(environment, command=cleanup_cmd)
             except Exception as cleanup_err:
                 _ = cleanup_err
+            p_tok, c_tok, cached_tok = extract_context_or_trajectory_tokens(context, self.logs_dir)
+            emit_harbor_trial_spend(
+                HarborTrialSpend(
+                    logs_dir=self.logs_dir,
+                    agent_name=self.name(),
+                    model_name=getattr(self, "model_name", None) or "vertex_ai/gemini-3.5-flash",
+                    prompt_tokens=p_tok,
+                    completion_tokens=c_tok,
+                    cached_tokens=cached_tok,
+                    origin="vertex-ai" if self._is_vertex_mode() else "gemini",
+                )
+            )
 
 
 class NomosGeminiCli(VertexGeminiCli):
