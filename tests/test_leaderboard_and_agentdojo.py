@@ -248,11 +248,11 @@ class TestLeaderboardKit(unittest.TestCase):
         mk_c = lambda role, parts: SimpleNamespace(role=role, parts=parts)
         mk_p = lambda text: SimpleNamespace(text=text)
         coalesced = _coalesce_role_turns(
-            [mk_c("user", ["u1"]), mk_c("user", ["u2"]), mk_c("model", ["blocked"])],
+            [mk_c("user", ["u1"]), mk_c("user", ["u2"]), mk_c("model", ["m1"]), mk_c("model", ["m2"])],
             mk_c,
             mk_p,
         )
-        self.assertEqual([c.role for c in coalesced], ["user", "model", "user"])
+        self.assertEqual([c.role for c in coalesced], ["user", "model", "user", "model", "user"])
         self.assertEqual(coalesced[0].parts, ["u1", "u2"])
 
         fake_req = SimpleNamespace(headers={"x-goog-api-key": "leak", "authorization": "Bearer x"})

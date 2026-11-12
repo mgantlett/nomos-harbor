@@ -87,9 +87,9 @@ def _assistant_msg_to_parts(msg: dict[str, Any], sig_cache: dict[str, bytes]) ->
     for block in msg.get(MSG_CONTENT_KEY) or []:
         if isinstance(block, dict) and block.get(MSG_CONTENT_KEY):
             parts.append(genai_types.Part.from_text(text=str(block[MSG_CONTENT_KEY])))
-    for tc in msg.get("tool_calls") or []:
+    for idx, tc in enumerate(msg.get("tool_calls") or []):
         fc = genai_types.FunctionCall(name=tc.function, args=dict(tc.args or {}))
-        sig = sig_cache.get(str(tc.id or ""))
+        sig = sig_cache.get(str(tc.id or "")) if idx == 0 else None
         if sig:
             parts.append(genai_types.Part(function_call=fc, thought_signature=sig))
         else:
@@ -122,15 +122,20 @@ def _coalesce_role_turns(
     make_content: Any,
     make_text_part: Any,
 ) -> list[Any]:
-    """Merge consecutive same-role turns and ensure the request ends on a `user` turn."""
+    """Coalesce consecutive `user` turns, separate consecutive `model` turns, and end on `user`."""
     merged: list[Any] = []
     for item in items:
         item_parts = list(getattr(item, "parts", None) or [])
         if not item_parts:
             continue
-        if merged and getattr(merged[-1], "role", None) == getattr(item, "role", None):
+        prev_role = getattr(merged[-1], "role", None) if merged else None
+        curr_role = getattr(item, "role", None)
+        if prev_role == "user" and curr_role == "user":
             prev_parts = list(getattr(merged[-1], "parts", None) or [])
-            merged[-1] = make_content(role=item.role, parts=prev_parts + item_parts)
+            merged[-1] = make_content(role="user", parts=prev_parts + item_parts)
+        elif prev_role == "model" and curr_role == "model":
+            merged.append(make_content(role="user", parts=[make_text_part(text=BLOCKED_RECOVERY_PROMPT)]))
+            merged.append(item)
         else:
             merged.append(item)
     if not merged or getattr(merged[-1], "role", None) == "model":
@@ -165,13 +170,17 @@ def response_to_assistant_msg(response: Any, sig_cache: dict[str, bytes]) -> dic
     if not response.candidates or not response.candidates[0].content:
         return ChatAssistantMessage(role="assistant", content=[], tool_calls=[])
     raw_parts = response.candidates[0].content.parts or []
+    turn_sig = next(
+        (getattr(p, "thought_signature", None) for p in raw_parts if getattr(p, "thought_signature", None)),
+        None,
+    )
     tool_calls = []
     text_blocks = []
     for part in raw_parts:
         if part.function_call:
             call_id = part.function_call.id or f"call_{uuid.uuid4().hex[:12]}"
             fn_name = part.function_call.name or "<empty-function-name>"
-            sig = getattr(part, "thought_signature", None)
+            sig = getattr(part, "thought_signature", None) or turn_sig
             if sig:
                 sig_cache[call_id] = sig
             tool_calls.append(
