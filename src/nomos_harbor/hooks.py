@@ -20,6 +20,7 @@ from nomos_harbor.hook_budget import (
 from nomos_harbor.hook_constants import (
     BUDGET_POST_TOOL_MATCHER,
     DEFAULT_INSTALL_URL,
+    DEFAULT_NOMOS_VERSION,
     DEFAULT_REMOTE_NOMOS_BIN,
     EOL_DEBIAN_APT_REPAIR_COMMAND,
     GEMINI_BUDGET_POST_TOOL_MATCHER,
@@ -47,6 +48,7 @@ from nomos_harbor.hook_gemini import (
 __all__ = [
     "BUDGET_POST_TOOL_MATCHER",
     "DEFAULT_INSTALL_URL",
+    "DEFAULT_NOMOS_VERSION",
     "DEFAULT_REMOTE_NOMOS_BIN",
     "EOL_DEBIAN_APT_REPAIR_COMMAND",
     "GEMINI_BUDGET_POST_TOOL_MATCHER",

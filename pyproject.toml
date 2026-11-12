@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nomos-harbor"
-version = "0.4.0"
-description = "Nomos deterministic governance harness adapter for Harbor and Harbor Index benchmarks"
+version = "0.5.0"
+description = "Nomos v4.17+ deterministic governance adapter for Harbor, Terminal-Bench 2.0, and AgentDojo leaderboards"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"

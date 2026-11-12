@@ -8,6 +8,7 @@ import shlex
 from typing import Any
 
 DEFAULT_INSTALL_URL = "https://sophialabs.ca/install"
+DEFAULT_NOMOS_VERSION = "v4.17.0"
 DEFAULT_REMOTE_NOMOS_BIN = "/usr/local/bin/nomos"
 HOOK_KEY_COMMAND = "command"
 HOOK_KEY_HOOKS = "hooks"
