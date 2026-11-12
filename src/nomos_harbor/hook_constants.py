@@ -16,6 +16,7 @@ HOOK_KEY_MATCHER = "matcher"
 HOOK_KEY_NAME = "name"
 HOOK_KEY_TIMEOUT = "timeout"
 HOOK_KEY_TYPE = "type"
+MSG_CONTENT_KEY = "content"
 UTF8_ENCODING = "utf-8"
 
 PRE_TOOL_MATCHER = (

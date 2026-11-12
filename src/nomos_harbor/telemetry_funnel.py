@@ -151,3 +151,48 @@ def emit_harbor_trial_spend(spend: HarborTrialSpend) -> bool:
     except (urllib.error.URLError, TimeoutError, OSError):
         return _append_durable_jsonl(record)
     return _append_durable_jsonl(record)
+
+
+def emit_soma_call_spend(
+    *,
+    subsystem: str,
+    model_name: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    cached_tokens: int = 0,
+    latency_ms: int = 0,
+    details: str = "",
+) -> bool:
+    """Emit per-call Gemini `/v1beta/` inference spend routed via SOMA to Cockpit telemetry."""
+    if _is_test_runtime() or (prompt_tokens <= 0 and completion_tokens <= 0):
+        return False
+    now_utc = datetime.now(timezone.utc)
+    nonce = hashlib.sha256(f"{now_utc.timestamp()}:{subsystem}:{prompt_tokens}:{completion_tokens}".encode(UTF8_ENCODING)).hexdigest()[:10]
+    record: dict[str, Any] = {
+        "id": f"soma-v1beta-{nonce}",
+        "timestamp": now_utc.strftime("%Y-%m-%d %H:%M:%S"),
+        "subsystem": subsystem,
+        "origin": "gemini",
+        "model": model_name,
+        "tier": "benchmark",
+        "promptTokens": max(0, int(prompt_tokens)),
+        "completionTokens": max(0, int(completion_tokens)),
+        "cachedTokens": max(0, int(cached_tokens)),
+        "latencyMs": max(0, int(latency_ms)),
+        "durationMs": max(0, int(latency_ms)),
+        "status": "SUCCESS",
+        "details": details or f"SOMA v1beta {model_name} ({prompt_tokens}+{completion_tokens} tok)",
+    }
+    req = urllib.request.Request(
+        f"{resolve_telemetry_base()}/api/telemetry/inference",
+        data=json.dumps(record).encode(UTF8_ENCODING),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            if 200 <= resp.status < 300:
+                return True
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return _append_durable_jsonl(record)
+    return _append_durable_jsonl(record)

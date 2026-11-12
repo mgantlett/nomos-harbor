@@ -20,7 +20,9 @@ from nomos_harbor.hook_constants import DEFAULT_NOMOS_VERSION, UTF8_ENCODING
 
 TERMINAL_BENCH_DATASET = "terminal-bench@2.0"
 TERMINAL_BENCH_TASK_COUNT = 89
+OFFICIAL_LEADERBOARD_ATTEMPTS = 5
 AGENTDOJO_SUITES = ("workspace", "slack", "travel", "banking")
+DEFAULT_GEMINI_AGENTDOJO_MODEL = "gemini-3.5-flash"
 
 TRACK_CONFIGS: dict[str, dict[str, str]] = {
     "efficiency-flash": {
@@ -49,6 +51,7 @@ def build_terminal_bench_commands(
     nomos_version: str = DEFAULT_NOMOS_VERSION,
     gcp_project: str | None = None,
     n_concurrent: int = 4,
+    n_attempts: int = OFFICIAL_LEADERBOARD_ATTEMPTS,
     upload_public: bool = True,
 ) -> list[str]:
     """Build the reproducible Harbor evaluation and `lb submit` commands for `Terminal-Bench 2.0`."""
@@ -67,6 +70,7 @@ def build_terminal_bench_commands(
         f"--agent {cfg['agent']} "
         f"--model {cfg['model']} "
         f"{' '.join(ak_parts)} "
+        f"--n-attempts {int(n_attempts)} "
         f"--n-concurrent {int(n_concurrent)}{upload_flags}"
     )
     submit_cmd = "uv run lb submit https://hub.harborframework.com/jobs/<job-uuid>"
@@ -74,15 +78,15 @@ def build_terminal_bench_commands(
 
 
 def build_agentdojo_eval_plan(
-    model: str = "claude-sonnet-4-5-20250929",
+    model: str = DEFAULT_GEMINI_AGENTDOJO_MODEL,
     attack: str = "important_instructions",
     nomos_version: str = DEFAULT_NOMOS_VERSION,
 ) -> dict[str, Any]:
     """Build the reproducible `ethz-spylab/agentdojo` 4-suite evaluation & PR manifest."""
     suite_commands = [
         (
-            f"python3 -m agentdojo.scripts.benchmark -s {suite} "
-            f"--model {model} --defense nomos_v417_defense --attack {attack}"
+            f"python3 -m nomos_harbor.agentdojo_runner --suite {suite} "
+            f"--model {model} --attack {attack}"
         )
         for suite in AGENTDOJO_SUITES
     ]
@@ -162,7 +166,8 @@ def main(argv: list[str] | None = None) -> int:
         default="terminal-bench",
     )
     parser.add_argument("--track", default="efficiency-flash")
-    parser.add_argument("--model", default="claude-sonnet-4-5-20250929")
+    parser.add_argument("--model", default=DEFAULT_GEMINI_AGENTDOJO_MODEL)
+    parser.add_argument("--n-attempts", type=int, default=OFFICIAL_LEADERBOARD_ATTEMPTS)
     parser.add_argument("--gcp-project", default=None)
     parser.add_argument("--job-dir", type=Path, default=None)
     args = parser.parse_args(argv)
@@ -174,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
             "commands": build_terminal_bench_commands(
                 track=args.track,
                 gcp_project=args.gcp_project,
+                n_attempts=args.n_attempts,
             ),
         }
     elif args.target == "agentdojo":
@@ -181,7 +187,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if args.job_dir is None:
             raise ValueError("--job-dir is required when --target=validate-job")
-        payload = validate_harbor_job_for_submission(args.job_dir)
+        expected_total = TERMINAL_BENCH_TASK_COUNT * max(1, int(args.n_attempts))
+        payload = validate_harbor_job_for_submission(args.job_dir, expected_tasks=expected_total)
 
     print(json.dumps(payload, indent=2))
     return 0

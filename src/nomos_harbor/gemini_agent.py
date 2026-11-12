@@ -190,6 +190,23 @@ class VertexGeminiCli(GeminiCli):
                 )
             )
 
+    @override
+    def populate_context_post_run(self, context: AgentContext) -> None:
+        """Parse Gemini trajectory tokens post-download and emit FinOps spend to Cockpit."""
+        super().populate_context_post_run(context)
+        p_tok, c_tok, cached_tok = extract_context_or_trajectory_tokens(context, self.logs_dir)
+        emit_harbor_trial_spend(
+            HarborTrialSpend(
+                logs_dir=self.logs_dir,
+                agent_name=self.name(),
+                model_name=getattr(self, "model_name", None) or "vertex_ai/gemini-3.5-flash",
+                prompt_tokens=p_tok,
+                completion_tokens=c_tok,
+                cached_tokens=cached_tok,
+                origin="vertex-ai" if self._is_vertex_mode() else "gemini",
+            )
+        )
+
 
 class NomosGeminiCli(VertexGeminiCli):
     """Gemini CLI governed by compiled Go `nomos hook` interceptors inside Harbor trials."""

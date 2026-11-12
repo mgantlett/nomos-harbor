@@ -21,6 +21,7 @@ from nomos_harbor.telemetry_funnel import (  # noqa: E402
     HarborTrialSpend,
     compute_trial_event_id,
     emit_harbor_trial_spend,
+    emit_soma_call_spend,
     extract_context_or_trajectory_tokens,
     resolve_telemetry_base,
     resolve_treasury_jsonl_path,
@@ -204,6 +205,45 @@ class TestHarborTelemetryFunnel(unittest.TestCase):
                 saved = json.loads(lines[0])
                 self.assertEqual(saved["id"], compute_trial_event_id(logs_dir))
                 self.assertEqual(saved["promptTokens"], 9200)
+        finally:
+            _restore_env("NOMOS_FORCE_TELEMETRY_TEST", prev_force)
+            _restore_env("NOMOS_TELEMETRY_URL", prev_url)
+            _restore_env("NOMOS_TREASURY_JSONL", prev_jsonl)
+
+    def test_emit_soma_call_spend_http_and_fallback(self) -> None:
+        """Verify `emit_soma_call_spend` handles zero-token skip and JSONL fallback."""
+        self.assertFalse(
+            emit_soma_call_spend(
+                subsystem="benchmark-agentdojo",
+                model_name="gemini-3.5-flash",
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
+        )
+        loopback = "127.0.0.1"
+        prev_force = os.environ.get("NOMOS_FORCE_TELEMETRY_TEST")
+        prev_url = os.environ.get("NOMOS_TELEMETRY_URL")
+        prev_jsonl = os.environ.get("NOMOS_TREASURY_JSONL")
+        os.environ["NOMOS_FORCE_TELEMETRY_TEST"] = "1"
+        os.environ["NOMOS_TELEMETRY_URL"] = f"http://{loopback}:1"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                ledger = Path(tmp) / "soma_spend.jsonl"
+                os.environ["NOMOS_TREASURY_JSONL"] = str(ledger)
+                ok = emit_soma_call_spend(
+                    subsystem="benchmark-agentdojo",
+                    model_name="gemini-3.5-flash",
+                    prompt_tokens=310,
+                    completion_tokens=95,
+                    cached_tokens=20,
+                    latency_ms=412,
+                )
+                self.assertTrue(ok)
+                saved = json.loads(ledger.read_text(encoding="utf-8").strip())
+                self.assertEqual(saved["subsystem"], "benchmark-agentdojo")
+                self.assertEqual(saved["origin"], "gemini")
+                self.assertEqual(saved["promptTokens"], 310)
+                self.assertEqual(saved["completionTokens"], 95)
         finally:
             _restore_env("NOMOS_FORCE_TELEMETRY_TEST", prev_force)
             _restore_env("NOMOS_TELEMETRY_URL", prev_url)
