@@ -38,6 +38,7 @@ from nomos_harbor.leaderboard_kit import (  # noqa: E402
 )
 from nomos_harbor.soma_gemini_llm import (  # noqa: E402
     _SomaHeaderInjector,
+    _is_retryable_api_error,
     extract_genai_usage_tokens,
     resolve_soma_base,
 )
@@ -240,6 +241,8 @@ class TestLeaderboardKit(unittest.TestCase):
         self.assertEqual(summary["attack_utility_pct"], 50.0)
         self.assertEqual(summary["targeted_asr_pct"], 0.0)
         self.assertTrue(resolve_soma_base().endswith("9000"))
+        self.assertTrue(_is_retryable_api_error(RuntimeError("429 Rate limit or circuit breaker active")))
+        self.assertFalse(_is_retryable_api_error(ValueError("400 invalid argument")))
 
         fake_req = SimpleNamespace(headers={"x-goog-api-key": "leak", "authorization": "Bearer x"})
         _SomaHeaderInjector("benchmark-agentdojo")(fake_req)

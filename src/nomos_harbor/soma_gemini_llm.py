@@ -156,6 +156,34 @@ def response_to_assistant_msg(response: Any, sig_cache: dict[str, bytes]) -> dic
     return ChatAssistantMessage(role="assistant", content=text_blocks, tool_calls=tool_calls)
 
 
+def _is_retryable_api_error(exc: Exception) -> bool:
+    """Return True for transient rate-limit (`429`) or gateway (`5xx`) errors."""
+    code = int(getattr(exc, "code", 0) or getattr(exc, "status_code", 0) or 0)
+    if code in {429, 500, 502, 503, 504}:
+        return True
+    msg = str(exc).lower()
+    return "429" in msg or "rate limit" in msg or "circuit breaker" in msg
+
+
+def _generate_with_rate_backoff(
+    client: Any,
+    model: str,
+    contents: Any,
+    config: Any,
+    max_attempts: int = 8,
+) -> Any:
+    """Call `client.models.generate_content` with backoff on SOMA/Gemini `429` or `5xx`."""
+    for attempt in range(max_attempts):
+        try:
+            return client.models.generate_content(model=model, contents=contents, config=config)
+        except Exception as exc:
+            if attempt + 1 >= max_attempts or not _is_retryable_api_error(exc):
+                raise
+            delay = min(30.0, 2.0 * (1.7**attempt))
+            time.sleep(delay)
+    raise RuntimeError("unreachable retry exhaustion")
+
+
 def invoke_soma_generate(
     *,
     client: Any,
@@ -165,11 +193,9 @@ def invoke_soma_generate(
     config: Any,
     label: str,
 ) -> Any:
-    """Invoke `chat_completion_request` via SOMA and record token spend in Cockpit."""
-    from agentdojo.agent_pipeline.llms.google_llm import chat_completion_request
-
+    """Invoke `generate_content` via SOMA with `429` backoff and record token spend in Cockpit."""
     t0 = time.monotonic()
-    resp = chat_completion_request(model, client, contents, generation_config=config)
+    resp = _generate_with_rate_backoff(client, model, contents, config)
     p_tok, c_tok, cache_tok = extract_genai_usage_tokens(resp)
     emit_soma_call_spend(
         subsystem=subsystem,
