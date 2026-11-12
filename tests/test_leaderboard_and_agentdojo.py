@@ -226,6 +226,7 @@ class TestLeaderboardKit(unittest.TestCase):
         self.assertEqual(parse_capability_tool_list("none_at_all", avail), avail)
 
         cfg = AgentDojoSuiteConfig(suite_name="banking", logdir=Path("/tmp"))
+        self.assertEqual(cfg.attack, "important_instructions")
         summary = summarize_suite_results(
             cfg=cfg,
             pipeline_name="gemini-3.5-flash-nomos_v417_defense",

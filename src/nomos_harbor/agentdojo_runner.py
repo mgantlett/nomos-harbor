@@ -217,13 +217,15 @@ def build_nomos_agentdojo_pipeline(
     from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline
     from agentdojo.agent_pipeline.basic_elements import InitQuery, SystemMessage
     from agentdojo.agent_pipeline.tool_execution import ToolsExecutionLoop, ToolsExecutor
+    from agentdojo.models import MODEL_NAMES
 
+    MODEL_NAMES.setdefault(model, "AI model developed by Google")
     nonce = secrets.token_hex(4)
     resolved_soma = soma_url or resolve_soma_base()
     llm_el, cap_el = _create_soma_pipeline_elements(model=model, soma_url=resolved_soma, subsystem=subsystem)
     pre_guard = NomosAgentDojoDefense(container_sandbox=True, fence_nonce=nonce)
     post_fence = NomosAgentDojoDefense(container_sandbox=True, fence_all_tool_outputs=True, fence_nonce=nonce)
-    loop = ToolsExecutionLoop([pre_guard, ToolsExecutor(), post_fence, InitQuery(), llm_el])
+    loop = ToolsExecutionLoop([pre_guard, ToolsExecutor(), post_fence, llm_el])
     pipeline = AgentPipeline([SystemMessage(NOMOS_DEFENSE_SYSTEM_PROMPT), InitQuery(), cap_el, llm_el, loop])
     pipeline.name = f"{model}-nomos_v417_defense"
     return pipeline
