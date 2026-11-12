@@ -38,6 +38,7 @@ from nomos_harbor.leaderboard_kit import (  # noqa: E402
 )
 from nomos_harbor.soma_gemini_llm import (  # noqa: E402
     _SomaHeaderInjector,
+    _coalesce_role_turns,
     _is_retryable_api_error,
     extract_genai_usage_tokens,
     resolve_soma_base,
@@ -243,6 +244,16 @@ class TestLeaderboardKit(unittest.TestCase):
         self.assertTrue(resolve_soma_base().endswith("9000"))
         self.assertTrue(_is_retryable_api_error(RuntimeError("429 Rate limit or circuit breaker active")))
         self.assertFalse(_is_retryable_api_error(ValueError("400 invalid argument")))
+
+        mk_c = lambda role, parts: SimpleNamespace(role=role, parts=parts)
+        mk_p = lambda text: SimpleNamespace(text=text)
+        coalesced = _coalesce_role_turns(
+            [mk_c("user", ["u1"]), mk_c("user", ["u2"]), mk_c("model", ["blocked"])],
+            mk_c,
+            mk_p,
+        )
+        self.assertEqual([c.role for c in coalesced], ["user", "model", "user"])
+        self.assertEqual(coalesced[0].parts, ["u1", "u2"])
 
         fake_req = SimpleNamespace(headers={"x-goog-api-key": "leak", "authorization": "Bearer x"})
         _SomaHeaderInjector("benchmark-agentdojo")(fake_req)
