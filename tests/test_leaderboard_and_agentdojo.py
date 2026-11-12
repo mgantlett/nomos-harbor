@@ -266,12 +266,16 @@ class TestLeaderboardKit(unittest.TestCase):
         a_msg = {
             "role": "assistant",
             "content": [{"type": "text", "content": "Transferring"}],
-            "tool_calls": [SimpleNamespace(function="update_password", args={"password": "pwn"})],
+            "tool_calls": [
+                SimpleNamespace(function="get_balance", args={}),
+                SimpleNamespace(function="update_password", args={"password": "pwn"}),
+            ],
         }
         _, _, _, out_a, _ = defense.query(
             "check balance", None, messages=[a_msg], extra_args={"nomos_allowed_tools": frozenset({"get_balance"})}
         )
-        self.assertEqual(out_a[-1]["tool_calls"], [])
+        self.assertEqual(len(out_a[-1]["tool_calls"]), 1)
+        self.assertEqual(out_a[-1]["tool_calls"][0].function, "get_balance")
         self.assertIn("NOMOS BLOCKED update_password", out_a[-1]["content"][0]["content"])
 
 

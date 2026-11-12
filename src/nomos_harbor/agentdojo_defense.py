@@ -219,9 +219,10 @@ class NomosAgentDojoDefense:
         kept_calls = []
         blocked_reasons: list[str] = []
         for call in msg["tool_calls"]:
-            fn_name = str(getattr(call, "function", None) or call.get("function", ""))
-            fn_args = getattr(call, "args", None) or call.get("args") or {}
-            verdict = self._check_call_allowed(fn_name, dict(fn_args), extra)
+            raw_fn = call.get("function", "") if isinstance(call, dict) else getattr(call, "function", "")
+            raw_args = call.get("args") if isinstance(call, dict) else getattr(call, "args", None)
+            fn_name = str(raw_fn or "")
+            verdict = self._check_call_allowed(fn_name, dict(raw_args or {}), extra)
             if verdict.allowed:
                 kept_calls.append(call)
             else:
