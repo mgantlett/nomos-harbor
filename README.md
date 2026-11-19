@@ -1,6 +1,6 @@
-# Nomos Harbor Evaluation Harness Adapter (`nomos-harbor`)
+# Nomos Execution Substrate Adapter for Harbor (`nomos-harbor`)
 
-Deterministic governance adapter wrapping Harbor's built-in `ClaudeCode` and `GeminiCli` agents with compiled Go [`nomos hook`](https://github.com/mgantlett/nomos) interceptors (`pre-tool` anti-reward-hacking & bounded loop circuit-breaker + `post-tool` sub-15ms in-memory polyglot AST/syntax radar, verified host-health snapshots, and MCTS-calibrated budget advisories).
+Deterministic Go execution substrate adapter wrapping Harbor's built-in `ClaudeCode` and `GeminiCli` agents with compiled Go [`nomos hook`](https://github.com/mgantlett/nomos) interceptors (`pre-tool` anti-reward-hacking & bounded loop circuit-breaker + `post-tool` sub-15ms in-memory polyglot AST/syntax radar, verified host-health snapshots, and MCTS-calibrated budget advisories).
 
 Designed for reproducible, apples-to-apples paired Harbor evaluations (`Control` vs. `Control + Nomos`) across Claude Code and Gemini CLI on [Harbor](https://github.com/harbor-framework/harbor) and the [Harbor Index](https://github.com/harbor-framework/harbor-index) leaderboard.
 
